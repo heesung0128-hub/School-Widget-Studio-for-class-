@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">학교 생활 위젯</string>
+    <string name="widget_label">학교 생활 위젯 (시간표/급식/D-Day)</string>
+</resources>

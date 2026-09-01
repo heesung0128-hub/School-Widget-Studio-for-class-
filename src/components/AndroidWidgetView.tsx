@@ -112,6 +112,32 @@ export const AndroidWidgetView: React.FC<AndroidWidgetViewProps> = ({ config }) 
         </div>
       </div>
 
+      {/* GitHub Actions 자동 빌드 안내 (Android Studio 불필요) */}
+      <div className="p-4 rounded-2xl bg-blue-950/30 border border-blue-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <ShieldCheck className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <div className="font-bold text-white text-sm">
+              더 간단한 방법: Android Studio 없이 완성된 APK만 다운로드
+            </div>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              저장소의 <code className="text-blue-300">android/</code> 폴더는 GitHub Actions가 자동으로 빌드하는 완전한 프로젝트입니다.
+              저장소의 <strong>Releases</strong> 탭에서 최신 <code className="text-blue-300">app-debug.apk</code> 파일을
+              태블릿으로 바로 다운로드해 설치하면, Android Studio 설치·파일 복사·USB 연결 없이 위젯을 쓸 수 있습니다.
+            </p>
+          </div>
+        </div>
+        <a
+          href="https://github.com/heesung0128-hub/School-Widget-Studio-for-class-/releases"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="px-3 py-1.5 rounded-xl text-xs sm:text-sm font-bold bg-blue-600 hover:bg-blue-500 text-white flex items-center gap-1.5 transition-all shadow-md shadow-blue-600/20 shrink-0"
+        >
+          <ExternalLink className="w-3.5 h-3.5" />
+          <span>Releases에서 APK 받기</span>
+        </a>
+      </div>
+
       {/* Main Grid: Left Tablet Mockup Preview / Right Code & Studio Export */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left: Device Simulator (5 cols) */}
