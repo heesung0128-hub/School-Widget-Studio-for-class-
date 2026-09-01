@@ -21,45 +21,66 @@ data class WidgetConfigData(
     val timetable: List<TimetableDay>
 )
 
+private const val INTERNAL_CONFIG_FILENAME = "widget_config.json"
+
+fun parseWidgetConfigJson(text: String): WidgetConfigData {
+    val root = JSONObject(text)
+
+    val ddaysArray = root.optJSONArray("ddays")
+    val ddays = mutableListOf<DDayItem>()
+    if (ddaysArray != null) {
+        for (i in 0 until ddaysArray.length()) {
+            val obj = ddaysArray.getJSONObject(i)
+            ddays.add(DDayItem(obj.optString("title"), obj.optString("targetDate")))
+        }
+    }
+
+    val timetableArray = root.optJSONArray("timetable")
+    val timetable = mutableListOf<TimetableDay>()
+    if (timetableArray != null) {
+        for (i in 0 until timetableArray.length()) {
+            val obj = timetableArray.getJSONObject(i)
+            val periodsArray = obj.optJSONArray("periods")
+            val periods = mutableListOf<String>()
+            if (periodsArray != null) {
+                for (j in 0 until periodsArray.length()) {
+                    periods.add(periodsArray.optString(j))
+                }
+            }
+            timetable.add(TimetableDay(obj.optString("day"), periods))
+        }
+    }
+
+    return WidgetConfigData(ddays, timetable)
+}
+
 /**
- * 스튜디오(웹 앱)의 [위젯 설정] 탭에서 시간표/D-Day를 바꾼 뒤 "widget_config.json 다운로드"로
- * 받은 파일을 이 경로(app/src/main/assets/widget_config.json)에 덮어쓰고 커밋/푸시하면,
- * 다음 자동 빌드부터 위젯에 바로 반영된다.
+ * 기기 내부 저장소(앱 전용 filesDir)에 이전에 저장된 설정이 있으면 그것을 우선 사용하고,
+ * 없으면 APK에 번들된 기본값(app/src/main/assets/widget_config.json)을 사용한다.
+ *
+ * 내부 저장소 값은 두 가지 방법으로 채워진다:
+ *  1) 스튜디오의 "widget_config.json 다운로드" 파일을 assets 폴더에 넣고 다시 빌드 (기존 방식)
+ *  2) 스튜디오의 "이 기기에 적용하기" 버튼/QR코드 딥링크로 앱을 재빌드하지 않고 바로 전달
+ *     (ConfigImportActivity/MainActivity에서 받아 saveWidgetConfig()로 저장, 아래 참고)
  */
 fun loadWidgetConfig(context: Context): WidgetConfigData {
     return try {
-        val text = context.assets.open("widget_config.json").bufferedReader().use { it.readText() }
-        val root = JSONObject(text)
-
-        val ddaysArray = root.optJSONArray("ddays")
-        val ddays = mutableListOf<DDayItem>()
-        if (ddaysArray != null) {
-            for (i in 0 until ddaysArray.length()) {
-                val obj = ddaysArray.getJSONObject(i)
-                ddays.add(DDayItem(obj.optString("title"), obj.optString("targetDate")))
-            }
+        val internalFile = java.io.File(context.filesDir, INTERNAL_CONFIG_FILENAME)
+        val text = if (internalFile.exists()) {
+            internalFile.readText()
+        } else {
+            context.assets.open(INTERNAL_CONFIG_FILENAME).bufferedReader().use { it.readText() }
         }
-
-        val timetableArray = root.optJSONArray("timetable")
-        val timetable = mutableListOf<TimetableDay>()
-        if (timetableArray != null) {
-            for (i in 0 until timetableArray.length()) {
-                val obj = timetableArray.getJSONObject(i)
-                val periodsArray = obj.optJSONArray("periods")
-                val periods = mutableListOf<String>()
-                if (periodsArray != null) {
-                    for (j in 0 until periodsArray.length()) {
-                        periods.add(periodsArray.optString(j))
-                    }
-                }
-                timetable.add(TimetableDay(obj.optString("day"), periods))
-            }
-        }
-
-        WidgetConfigData(ddays, timetable)
+        parseWidgetConfigJson(text)
     } catch (e: Exception) {
         WidgetConfigData(emptyList(), emptyList())
     }
+}
+
+/** 딥링크로 전달받은 시간표/D-Day JSON을 기기 내부 저장소에 저장해 다음 위젯 갱신부터 반영한다. */
+fun saveWidgetConfig(context: Context, jsonText: String) {
+    val internalFile = java.io.File(context.filesDir, INTERNAL_CONFIG_FILENAME)
+    internalFile.writeText(jsonText)
 }
 
 /**

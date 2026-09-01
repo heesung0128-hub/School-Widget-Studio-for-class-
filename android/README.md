@@ -16,6 +16,21 @@ GitHub Actions 서버에서 자동으로 APK를 빌드하고, 저장소의 **Rel
 
 Android Studio를 열거나, 파일을 복사-붙여넣기 하거나, USB로 PC와 연결할 필요가 전혀 없습니다.
 
+## 다른 사람(다른 학교)도 이 위젯을 쓸 수 있나요?
+
+네. **같은 APK를 모두가 그대로 설치**하고, 자기 학교/시간표/D-Day는 웹 스튜디오에서 설정한 뒤
+**[이 기기에 적용하기]** 버튼으로 전달합니다 — 저장소에 커밋/푸시할 필요가 전혀 없습니다.
+
+1. 위젯을 쓸 태블릿(또는 스마트폰)에 위 "Releases에서 APK 받기" 방법으로 앱을 설치합니다 (최초 1회, 모두가 같은 파일 사용).
+2. 같은 기기의 브라우저로 웹 스튜디오를 열고, [위젯 설정] 탭에서 학교/시간표/D-Day를 자유롭게 설정합니다.
+3. [📱 안드로이드 (태블릿) 위젯] 탭의 **[이 기기에 적용하기]** 버튼을 누르면 이미 설치된 앱이 열리며
+   설정이 바로 반영됩니다 (`schoolwidget://import?...` 딥링크, [`MainActivity.kt`](app/src/main/java/com/school/widget/MainActivity.kt)에서 처리).
+4. 다른 기기(예: PC에서 설정하고 태블릿에 적용)라면 같은 버튼 옆의 **[다른 기기로 전송 (QR코드)]**로
+   QR코드를 띄우고, 위젯 앱이 설치된 기기의 카메라로 스캔하면 됩니다.
+
+이 방식은 각 기기의 앱 내부 저장소에만 설정이 저장되므로, 기기마다 서로 다른 학교/시간표를 쓸 수 있고
+클라우드 동기화나 서버 없이도 동작합니다. (반대로, 기기를 초기화하거나 앱을 지우면 다시 적용해야 합니다.)
+
 ## 위젯을 수정하고 싶을 때 (공통 흐름)
 
 무엇을 바꾸든 흐름은 항상 동일합니다.
@@ -31,7 +46,8 @@ Android Studio를 열거나, 파일을 복사-붙여넣기 하거나, USB로 PC�
 
 | 바꾸고 싶은 것 | 수정할 파일 |
 | --- | --- |
-| **시간표 / D-Day** (코딩 불필요) | 웹 스튜디오의 [📱 안드로이드 (태블릿) 위젯] 탭에서 `widget_config.json`을 다운로드해 [`app/src/main/assets/widget_config.json`](app/src/main/assets/widget_config.json)에 덮어쓰기 |
+| **학교 / 시간표 / D-Day** (내 기기, 코딩·git 불필요) | 웹 스튜디오의 [📱 안드로이드 (태블릿) 위젯] 탭 ➔ **[이 기기에 적용하기]** (다른 기기는 QR코드) |
+| **시간표 / D-Day의 기본값**(새로 설치하는 모든 사람에게 적용될 초기값) | 웹 스튜디오에서 `widget_config.json`을 다운로드해 [`app/src/main/assets/widget_config.json`](app/src/main/assets/widget_config.json)에 덮어쓰기 후 푸시 |
 | 위젯 디자인/레이아웃/색상/문구 | [`SchoolWidget.kt`](app/src/main/java/com/school/widget/SchoolWidget.kt) |
 | 급식 자동 전환 시각(13:30), 알레르기 표기 등 급식 로직 | [`NeisMealService.kt`](app/src/main/java/com/school/widget/NeisMealService.kt) |
 | 자동 갱신 주기(현재 15분) | [`MainActivity.kt`](app/src/main/java/com/school/widget/MainActivity.kt), [`BootReceiver.kt`](app/src/main/java/com/school/widget/BootReceiver.kt) (두 곳의 `PeriodicWorkRequestBuilder` 시간을 동일하게 맞춰야 합니다) |

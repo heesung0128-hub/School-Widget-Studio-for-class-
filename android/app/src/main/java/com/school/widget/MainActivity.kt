@@ -1,6 +1,9 @@
 package com.school.widget
 
+import android.content.Intent
 import android.os.Bundle
+import android.util.Base64
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
@@ -13,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.TabletAndroid
@@ -48,15 +52,26 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import org.json.JSONArray
+import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 class MainActivity : ComponentActivity() {
+    // 클래스 필드에 Compose State로 보관해두면, 앱이 이미 켜져 있는 상태에서
+    // 딥링크(onNewIntent)로 설정이 들어와도 액티비티를 재시작하지 않고 화면이 바로 갱신된다.
+    private val schoolNameState = mutableStateOf("")
+    private val statusMessageState = mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         schedulePeriodicWidgetSync()
 
         val prefs = getSharedPreferences("school_widget_prefs", MODE_PRIVATE)
+        schoolNameState.value = prefs.getString("school_name", NeisMealService.DEFAULT_SCHOOL_NAME)
+            ?: NeisMealService.DEFAULT_SCHOOL_NAME
+
+        handleImportIntent(intent)
 
         setContent {
             MaterialTheme(
@@ -68,10 +83,14 @@ class MainActivity : ComponentActivity() {
             ) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     SchoolWidgetSettingsScreen(
-                        currentSchool = prefs.getString("school_name", NeisMealService.DEFAULT_SCHOOL_NAME)
-                            ?: NeisMealService.DEFAULT_SCHOOL_NAME,
+                        currentSchool = schoolNameState.value,
+                        statusMessage = statusMessageState.value,
                         onSaveSchoolName = { name ->
-                            prefs.edit().putString("school_name", name).apply()
+                            schoolNameState.value = name
+                            getSharedPreferences("school_widget_prefs", MODE_PRIVATE)
+                                .edit()
+                                .putString("school_name", name)
+                                .apply()
                         },
                         onRefreshMeal = {
                             scheduleImmediateSync()
@@ -80,6 +99,62 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleImportIntent(intent)
+    }
+
+    /**
+     * 웹 스튜디오의 "이 기기에 적용하기" 버튼이나 QR코드가 여는
+     * schoolwidget://import?config=<base64url(JSON)> 딥링크를 처리한다.
+     * JSON 형태: { "school": {officeCode, schoolCode, schoolName}, "ddays": [...], "timetable": [...] }
+     */
+    private fun handleImportIntent(intent: Intent?): Boolean {
+        val data = intent?.data ?: return false
+        if (data.scheme != "schoolwidget" || data.host != "import") return false
+        val encoded = data.getQueryParameter("config") ?: return false
+
+        return try {
+            val jsonText = decodeBase64UrlToString(encoded)
+            val root = JSONObject(jsonText)
+
+            val schoolObj = root.optJSONObject("school")
+            if (schoolObj != null) {
+                val newSchoolName = schoolObj.optString("schoolName", NeisMealService.DEFAULT_SCHOOL_NAME)
+                getSharedPreferences("school_widget_prefs", MODE_PRIVATE)
+                    .edit()
+                    .putString("school_name", newSchoolName)
+                    .putString("org_code", schoolObj.optString("officeCode", NeisMealService.DEFAULT_ATPT_OFCDC_SC_CODE))
+                    .putString("school_code", schoolObj.optString("schoolCode", NeisMealService.DEFAULT_SD_SCHUL_CODE))
+                    .apply()
+                schoolNameState.value = newSchoolName
+            }
+
+            val configPayload = JSONObject()
+            configPayload.put("ddays", root.optJSONArray("ddays") ?: JSONArray())
+            configPayload.put("timetable", root.optJSONArray("timetable") ?: JSONArray())
+            saveWidgetConfig(this, configPayload.toString())
+
+            // 위젯 및 급식 정보 즉시 갱신
+            scheduleImmediateSync()
+
+            statusMessageState.value = "✅ 스튜디오에서 보낸 학교 정보/시간표/D-Day를 적용했습니다."
+            Toast.makeText(this, "학교 설정을 적용했습니다", Toast.LENGTH_LONG).show()
+            true
+        } catch (e: Exception) {
+            statusMessageState.value = "⚠️ 설정을 적용하지 못했습니다. 링크가 손상되었을 수 있습니다."
+            false
+        }
+    }
+
+    private fun decodeBase64UrlToString(encoded: String): String {
+        var s = encoded.replace('-', '+').replace('_', '/')
+        while (s.length % 4 != 0) s += "="
+        val bytes = Base64.decode(s, Base64.DEFAULT)
+        return String(bytes, Charsets.UTF_8)
     }
 
     private fun schedulePeriodicWidgetSync() {
@@ -108,10 +183,11 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun SchoolWidgetSettingsScreen(
     currentSchool: String,
+    statusMessage: String?,
     onSaveSchoolName: (String) -> Unit,
     onRefreshMeal: () -> Unit
 ) {
-    var schoolInput by remember { mutableStateOf(currentSchool) }
+    var schoolInput by remember(currentSchool) { mutableStateOf(currentSchool) }
     var snackbarVisible by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -164,8 +240,47 @@ fun SchoolWidgetSettingsScreen(
                 }
             }
 
-            // 학교 표시 이름 설정 (급식 조회에 사용되는 교육청/학교 코드는
-            // NeisMealService.kt의 기본값을 바꾼 뒤 앱을 다시 빌드해야 변경됨)
+            // 딥링크로 시간표/D-Day를 가져올 수 있다는 안내
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Link,
+                        contentDescription = null,
+                        tint = Color(0xFF34D399),
+                        modifier = Modifier.width(36.dp)
+                    )
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column {
+                        Text(
+                            text = "시간표/D-Day 가져오기",
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            fontSize = 15.sp
+                        )
+                        Text(
+                            text = "이 기기 브라우저에서 웹 스튜디오를 열고 [이 기기에 적용하기]를 누르면, 다시 앱을 설치하지 않고도 시간표와 D-Day가 여기 바로 반영됩니다.",
+                            color = Color(0xFF94A3B8),
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+            }
+
+            if (statusMessage != null) {
+                Text(
+                    text = statusMessage,
+                    color = if (statusMessage.startsWith("✅")) Color(0xFF4ADE80) else Color(0xFFFCA5A5),
+                    fontSize = 13.sp
+                )
+            }
+
+            // 학교 표시 이름 설정
             OutlinedTextField(
                 value = schoolInput,
                 onValueChange = {

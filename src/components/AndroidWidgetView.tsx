@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import QRCode from 'qrcode';
 import { WidgetConfig } from '../types';
 import { generateAndroidProjectFiles, AndroidCodeFiles } from '../utils/androidGenerator';
+import { buildImportDeepLink } from '../utils/deepLink';
 import {
   Tablet,
   Smartphone,
@@ -19,7 +21,8 @@ import {
   ShieldCheck,
   CheckCircle2,
   ExternalLink,
-  Info
+  Info,
+  QrCode
 } from 'lucide-react';
 
 interface AndroidWidgetViewProps {
@@ -27,6 +30,105 @@ interface AndroidWidgetViewProps {
 }
 
 type AndroidFileName = keyof AndroidCodeFiles;
+
+const ApplyToDeviceCard: React.FC<{ config: WidgetConfig }> = ({ config }) => {
+  const [showQr, setShowQr] = useState(false);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [qrError, setQrError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const deepLink = buildImportDeepLink(config);
+
+  useEffect(() => {
+    if (!showQr) return;
+    let cancelled = false;
+    QRCode.toDataURL(deepLink, { margin: 1, width: 260, color: { dark: '#0F172A', light: '#FFFFFF' } })
+      .then((url) => {
+        if (!cancelled) setQrDataUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setQrError('QR코드를 생성하지 못했습니다.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showQr, deepLink]);
+
+  const handleApplyHere = () => {
+    window.location.href = deepLink;
+  };
+
+  const handleCopyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(deepLink);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy link', err);
+    }
+  };
+
+  return (
+    <div className="p-4 rounded-2xl bg-emerald-950/30 border border-emerald-500/30 space-y-3">
+      <div className="flex items-start gap-3">
+        <Smartphone className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+        <div className="space-y-1 flex-1">
+          <div className="font-bold text-white text-sm">
+            학교 / 시간표 / D-Day를 이미 설치된 앱에 바로 적용
+          </div>
+          <p className="text-xs text-slate-400 leading-relaxed">
+            앱을 다시 빌드하거나 재설치하지 않고, 지금 이 화면의 설정을 바로 위젯에 반영합니다.
+            <strong className="text-emerald-300"> 위젯 앱이 이미 설치된 기기</strong>의 브라우저에서 이 스튜디오를 열고 눌러야 합니다.
+          </p>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={handleApplyHere}
+          className="px-3 py-1.5 rounded-xl text-xs sm:text-sm font-bold bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1.5 transition-all shadow-md shadow-emerald-600/20"
+        >
+          <Smartphone className="w-3.5 h-3.5" />
+          <span>이 기기에 적용하기</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setShowQr((v) => !v)}
+          className="px-3 py-1.5 rounded-xl text-xs sm:text-sm font-bold bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 flex items-center gap-1.5 transition-all"
+        >
+          <QrCode className="w-3.5 h-3.5" />
+          <span>{showQr ? 'QR코드 닫기' : '다른 기기로 전송 (QR코드)'}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={handleCopyLink}
+          className="px-3 py-1.5 rounded-xl text-xs sm:text-sm font-bold bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 flex items-center gap-1.5 transition-all"
+        >
+          {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+          <span>{copied ? '링크 복사됨' : '링크만 복사'}</span>
+        </button>
+      </div>
+
+      {showQr && (
+        <div className="flex flex-col items-center gap-2 p-4 rounded-xl bg-slate-950/60 border border-slate-800">
+          {qrDataUrl ? (
+            <img src={qrDataUrl} alt="위젯 설정 적용 QR코드" className="w-48 h-48 rounded-lg bg-white p-2" />
+          ) : qrError ? (
+            <span className="text-xs text-red-400">{qrError}</span>
+          ) : (
+            <span className="text-xs text-slate-400">QR코드 생성 중...</span>
+          )}
+          <p className="text-[11px] text-slate-400 text-center leading-relaxed max-w-xs">
+            위젯 앱이 설치된 다른 기기(태블릿 등)의 카메라로 이 QR코드를 스캔하면 앱이 열리며 설정이 바로 적용됩니다.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+};
 
 export const AndroidWidgetView: React.FC<AndroidWidgetViewProps> = ({ config }) => {
   const [deviceMode, setDeviceMode] = useState<'tablet' | 'phone'>('tablet');
@@ -123,10 +225,9 @@ export const AndroidWidgetView: React.FC<AndroidWidgetViewProps> = ({ config }) 
             </div>
             <p className="text-xs text-slate-400 leading-relaxed">
               저장소의 <code className="text-blue-300">android/</code> 폴더는 GitHub Actions가 자동으로 빌드하는 완전한 프로젝트입니다.
-              저장소의 <strong>Releases</strong> 탭에서 최신 <code className="text-blue-300">app-debug.apk</code> 파일을
-              태블릿으로 바로 다운로드해 설치하면, Android Studio 설치·파일 복사·USB 연결 없이 위젯을 쓸 수 있습니다.
-              시간표나 D-Day를 바꾸고 싶다면 아래 탭에서 <code className="text-blue-300">widget_config.json</code>을 다운로드해
-              저장소의 <code className="text-blue-300">android/app/src/main/assets/widget_config.json</code>에 덮어쓰고 푸시하세요.
+              누구나 이 저장소를 직접 건드릴 필요 없이, <strong>Releases</strong> 탭에서 <code className="text-blue-300">app-debug.apk</code>
+              파일을 받아 태블릿에 한 번 설치하면 됩니다 (Android Studio·USB 연결 불필요). 학교/시간표/D-Day는
+              앱을 다시 설치하지 않고 아래 <strong>[이 기기에 적용하기]</strong>로 바로 반영할 수 있습니다.
             </p>
           </div>
         </div>
@@ -140,6 +241,9 @@ export const AndroidWidgetView: React.FC<AndroidWidgetViewProps> = ({ config }) 
           <span>Releases에서 APK 받기</span>
         </a>
       </div>
+
+      {/* 설치된 앱에 시간표/D-Day 바로 적용 (딥링크 + QR 백업) */}
+      <ApplyToDeviceCard config={config} />
 
       {/* Main Grid: Left Tablet Mockup Preview / Right Code & Studio Export */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
