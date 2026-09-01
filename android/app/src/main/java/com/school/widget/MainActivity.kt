@@ -178,6 +178,7 @@ class MainActivity : ComponentActivity() {
             configPayload.put("timetable", root.optJSONArray("timetable") ?: JSONArray())
             configPayload.put("todos", root.optJSONArray("todos") ?: JSONArray())
             configPayload.put("showCalories", root.optBoolean("showCalories", true))
+            configPayload.put("mealSwitchTime", root.optString("mealSwitchTime", "13:30"))
 
             // 안전 한도(길이/개수 제한)를 적용한 뒤의 실제 값으로 요약을 보여준다
             val parsed = parseWidgetConfigJson(configPayload.toString())

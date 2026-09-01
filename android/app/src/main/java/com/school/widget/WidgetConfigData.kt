@@ -35,7 +35,8 @@ data class WidgetConfigData(
     val ddays: List<DDayItem>,
     val timetable: List<TimetableDay>,
     val todos: List<TodoItemData>,
-    val showCalories: Boolean
+    val showCalories: Boolean,
+    val mealSwitchTime: String
 )
 
 // 스튜디오/딥링크로부터 받는 값이 악의적이거나 손상되었을 가능성을 대비한 안전 한도.
@@ -97,10 +98,11 @@ fun parseWidgetConfigJson(text: String): WidgetConfigData {
         }
     }
 
-    // 이전 버전에서 저장된 설정 파일에는 showCalories 필드가 없을 수 있으므로 기본값 true
+    // 이전 버전에서 저장된 설정 파일에는 이 필드들이 없을 수 있으므로 기본값을 둔다
     val showCalories = root.optBoolean("showCalories", true)
+    val mealSwitchTime = root.optString("mealSwitchTime", "13:30").take(5)
 
-    return WidgetConfigData(ddays, timetable, todos, showCalories)
+    return WidgetConfigData(ddays, timetable, todos, showCalories, mealSwitchTime)
 }
 
 private fun WidgetConfigData.toJson(): JSONObject {
@@ -135,6 +137,7 @@ private fun WidgetConfigData.toJson(): JSONObject {
     root.put("todos", todosArray)
 
     root.put("showCalories", showCalories)
+    root.put("mealSwitchTime", mealSwitchTime)
     return root
 }
 
@@ -157,7 +160,7 @@ fun loadWidgetConfig(context: Context): WidgetConfigData {
         }
         parseWidgetConfigJson(text)
     } catch (e: Exception) {
-        WidgetConfigData(emptyList(), emptyList(), emptyList(), true)
+        WidgetConfigData(emptyList(), emptyList(), emptyList(), true, "13:30")
     }
 }
 

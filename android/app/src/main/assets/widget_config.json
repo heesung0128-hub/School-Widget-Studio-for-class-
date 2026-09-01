@@ -16,5 +16,6 @@
     { "id": "2", "text": "나이스 출결 마감 및 확인", "completed": true },
     { "id": "3", "text": "학부모 상담 일지 작성", "completed": false }
   ],
-  "showCalories": true
+  "showCalories": true,
+  "mealSwitchTime": "13:30"
 }
