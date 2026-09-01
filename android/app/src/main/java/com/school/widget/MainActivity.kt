@@ -6,6 +6,7 @@ import android.util.Base64
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,15 +14,17 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Refresh
@@ -53,6 +56,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
@@ -131,6 +136,11 @@ class MainActivity : ComponentActivity() {
                             deleteTodo(this, id)
                             refreshFromStorage()
                             scheduleImmediateSync()
+                        },
+                        onReorderTodos = { newOrder ->
+                            reorderTodos(this, newOrder)
+                            refreshFromStorage()
+                            scheduleImmediateSync()
                         }
                     )
                 }
@@ -179,6 +189,8 @@ class MainActivity : ComponentActivity() {
             configPayload.put("todos", root.optJSONArray("todos") ?: JSONArray())
             configPayload.put("showCalories", root.optBoolean("showCalories", true))
             configPayload.put("mealSwitchTime", root.optString("mealSwitchTime", "13:30"))
+            configPayload.put("theme", root.optString("theme", "dark-acrylic"))
+            configPayload.put("fontScale", root.optDouble("fontScale", 1.0))
 
             // 안전 한도(길이/개수 제한)를 적용한 뒤의 실제 값으로 요약을 보여준다
             val parsed = parseWidgetConfigJson(configPayload.toString())
@@ -264,7 +276,8 @@ private fun SchoolWidgetSettingsScreen(
     onCancelImport: () -> Unit,
     onAddTodo: (String) -> Unit,
     onToggleTodo: (String) -> Unit,
-    onDeleteTodo: (String) -> Unit
+    onDeleteTodo: (String) -> Unit,
+    onReorderTodos: (List<TodoItemData>) -> Unit
 ) {
     var schoolInput by remember(currentSchool) { mutableStateOf(currentSchool) }
     var snackbarVisible by remember { mutableStateOf(false) }
@@ -313,7 +326,8 @@ private fun SchoolWidgetSettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(20.dp),
+                .padding(20.dp)
+                .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Card(
@@ -456,35 +470,105 @@ private fun SchoolWidgetSettingsScreen(
                 }
             }
 
-            LazyColumn(
+            Text(
+                text = "항목을 길게 눌러 위아래로 끌면 순서를 바꿀 수 있습니다.",
+                color = Color(0xFF64748B),
+                fontSize = 11.sp
+            )
+
+            ReorderableTodoList(
+                todos = todos,
+                onToggle = onToggleTodo,
+                onDelete = onDeleteTodo,
+                onReorder = onReorderTodos
+            )
+        }
+    }
+}
+
+/**
+ * 길게 누른 뒤 위/아래로 끌면 순서가 바뀌는 간단한 할 일 목록.
+ * 드래그 중에는 로컬 상태로만 순서를 미리 반영하다가, 손을 떼는 순간 저장소에 반영한다.
+ */
+@Composable
+private fun ReorderableTodoList(
+    todos: List<TodoItemData>,
+    onToggle: (String) -> Unit,
+    onDelete: (String) -> Unit,
+    onReorder: (List<TodoItemData>) -> Unit
+) {
+    var localTodos by remember(todos) { mutableStateOf(todos) }
+    var draggedId by remember { mutableStateOf<String?>(null) }
+    var dragOffsetPx by remember { mutableStateOf(0f) }
+    val density = LocalDensity.current
+    val rowHeightPx = with(density) { 48.dp.toPx() }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        localTodos.forEach { todo ->
+            val isDragging = todo.id == draggedId
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f, fill = false),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                items(todos, key = { it.id }) { todo ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        IconButton(onClick = { onToggleTodo(todo.id) }) {
-                            Icon(
-                                if (todo.completed) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
-                                contentDescription = null,
-                                tint = if (todo.completed) Color(0xFF4ADE80) else Color(0xFF94A3B8)
-                            )
-                        }
-                        Text(
-                            text = todo.text,
-                            modifier = Modifier.weight(1f),
-                            color = if (todo.completed) Color(0xFF64748B) else Color(0xFFE2E8F0),
-                            textDecoration = if (todo.completed) TextDecoration.LineThrough else TextDecoration.None,
-                            fontSize = 14.sp
+                    .offset(y = with(density) { (if (isDragging) dragOffsetPx else 0f).toDp() })
+                    .pointerInput(todo.id) {
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = {
+                                draggedId = todo.id
+                                dragOffsetPx = 0f
+                            },
+                            onDragEnd = {
+                                draggedId = null
+                                dragOffsetPx = 0f
+                                onReorder(localTodos)
+                            },
+                            onDragCancel = {
+                                draggedId = null
+                                dragOffsetPx = 0f
+                            },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                dragOffsetPx += dragAmount.y
+                                val currentIndex = localTodos.indexOfFirst { it.id == todo.id }
+                                if (currentIndex != -1) {
+                                    if (dragOffsetPx > rowHeightPx / 2 && currentIndex < localTodos.size - 1) {
+                                        localTodos = localTodos.toMutableList().apply {
+                                            add(currentIndex + 1, removeAt(currentIndex))
+                                        }
+                                        dragOffsetPx -= rowHeightPx
+                                    } else if (dragOffsetPx < -rowHeightPx / 2 && currentIndex > 0) {
+                                        localTodos = localTodos.toMutableList().apply {
+                                            add(currentIndex - 1, removeAt(currentIndex))
+                                        }
+                                        dragOffsetPx += rowHeightPx
+                                    }
+                                }
+                            }
                         )
-                        IconButton(onClick = { onDeleteTodo(todo.id) }) {
-                            Icon(Icons.Default.Delete, contentDescription = "삭제", tint = Color(0xFF94A3B8))
-                        }
-                    }
+                    },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Default.DragHandle,
+                    contentDescription = "길게 눌러 순서 변경",
+                    tint = Color(0xFF64748B),
+                    modifier = Modifier.padding(end = 4.dp)
+                )
+                IconButton(onClick = { onToggle(todo.id) }) {
+                    Icon(
+                        if (todo.completed) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                        contentDescription = null,
+                        tint = if (todo.completed) Color(0xFF4ADE80) else Color(0xFF94A3B8)
+                    )
+                }
+                Text(
+                    text = todo.text,
+                    modifier = Modifier.weight(1f),
+                    color = if (todo.completed) Color(0xFF64748B) else Color(0xFFE2E8F0),
+                    textDecoration = if (todo.completed) TextDecoration.LineThrough else TextDecoration.None,
+                    fontSize = 14.sp
+                )
+                IconButton(onClick = { onDelete(todo.id) }) {
+                    Icon(Icons.Default.Delete, contentDescription = "삭제", tint = Color(0xFF94A3B8))
                 }
             }
         }

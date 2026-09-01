@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.glance.GlanceId
@@ -41,8 +42,9 @@ private val TodoIdKey = ActionParameters.Key<String>("todo_id")
 
 /**
  * 안드로이드 태블릿 & 스마트폰 홈 화면용 학교 생활 위젯 (Jetpack Glance).
- * 데스크톱(PowerShell) 위젯과 같은 구성: 날짜/시간, D-Day 전체, 오늘 시간표 전체,
- * 나이스 급식 전체 메뉴, 할 일 목록(체크/추가는 앱에서).
+ * 데스크톱(PowerShell) 위젯과 같은 구성: 날짜, D-Day 전체, 오늘 시간표 전체,
+ * 나이스 급식 전체 메뉴, 할 일 목록(체크/추가는 앱에서). 스튜디오에서 고른 테마와
+ * 글씨 크기 배율도 데스크톱 위젯과 동일하게 반영된다.
  */
 class SchoolWidget : GlanceAppWidget() {
 
@@ -56,6 +58,7 @@ class SchoolWidget : GlanceAppWidget() {
         val mealDateLabel = prefs.getString("meal_date_label", "") ?: ""
 
         val config = loadWidgetConfig(context)
+        val palette = paletteFor(config.theme)
         val ddayLabels = allDDayLabels(config.ddays)
         val todayDay = todayKoreanDay()
         val todaySchedule = config.timetable.find { it.day == todayDay }
@@ -63,6 +66,8 @@ class SchoolWidget : GlanceAppWidget() {
         provideContent {
             WidgetContent(
                 context = context,
+                palette = palette,
+                fontScale = config.fontScale,
                 schoolName = schoolName,
                 todayMeal = todayMeal,
                 calInfo = calInfo,
@@ -80,6 +85,8 @@ class SchoolWidget : GlanceAppWidget() {
     @Composable
     private fun WidgetContent(
         context: Context,
+        palette: WidgetPalette,
+        fontScale: Float,
         schoolName: String,
         todayMeal: String,
         calInfo: String,
@@ -91,6 +98,7 @@ class SchoolWidget : GlanceAppWidget() {
         todayPeriods: List<String>,
         todos: List<TodoItemData>
     ) {
+        val fs: (Int) -> TextUnit = { base -> (base * fontScale).sp }
         val dateFormat = SimpleDateFormat("yyyy년 M월 d일 (E)", Locale.KOREAN)
         val todayStr = dateFormat.format(Date())
         val pendingCount = todos.count { !it.completed }
@@ -98,7 +106,7 @@ class SchoolWidget : GlanceAppWidget() {
         Column(
             modifier = GlanceModifier
                 .fillMaxSize()
-                .background(Color(0xE60F172A))
+                .background(palette.containerBg)
                 .padding(16.dp)
         ) {
             // 1. 헤더: 날짜 + 학교명 (한 줄)
@@ -112,8 +120,8 @@ class SchoolWidget : GlanceAppWidget() {
                     text = todayStr,
                     maxLines = 1,
                     style = TextStyle(
-                        color = ColorProvider(Color.White),
-                        fontSize = 17.sp,
+                        color = ColorProvider(palette.textPrimary),
+                        fontSize = fs(17),
                         fontWeight = FontWeight.Bold
                     )
                 )
@@ -123,8 +131,8 @@ class SchoolWidget : GlanceAppWidget() {
                     maxLines = 1,
                     modifier = GlanceModifier.defaultWeight(),
                     style = TextStyle(
-                        color = ColorProvider(Color(0xFF60A5FA)),
-                        fontSize = 13.sp,
+                        color = ColorProvider(palette.accent),
+                        fontSize = fs(13),
                         fontWeight = FontWeight.Bold
                     )
                 )
@@ -138,7 +146,7 @@ class SchoolWidget : GlanceAppWidget() {
                     ddayLabels.chunked(2).forEach { rowLabels ->
                         Row(modifier = GlanceModifier.fillMaxWidth()) {
                             rowLabels.forEach { label ->
-                                DDayChip(label, modifier = GlanceModifier.defaultWeight())
+                                DDayChip(label, fs, modifier = GlanceModifier.defaultWeight())
                                 if (label !== rowLabels.last()) {
                                     Spacer(modifier = GlanceModifier.width(4.dp))
                                 }
@@ -157,15 +165,15 @@ class SchoolWidget : GlanceAppWidget() {
             Box(
                 modifier = GlanceModifier
                     .fillMaxWidth()
-                    .background(Color(0xFF1E293B))
+                    .background(palette.cardBg)
                     .padding(10.dp)
             ) {
                 Column {
                     Text(
                         text = "시간표 ($todayDay)",
                         style = TextStyle(
-                            color = ColorProvider(Color(0xFF38BDF8)),
-                            fontSize = 14.sp,
+                            color = ColorProvider(palette.accent),
+                            fontSize = fs(14),
                             fontWeight = FontWeight.Bold
                         )
                     )
@@ -173,19 +181,19 @@ class SchoolWidget : GlanceAppWidget() {
                     if (todayPeriods.isEmpty()) {
                         Text(
                             text = "오늘 등록된 시간표가 없습니다.",
-                            style = TextStyle(color = ColorProvider(Color(0xFF94A3B8)), fontSize = 12.sp)
+                            style = TextStyle(color = ColorProvider(palette.textSecondary), fontSize = fs(12))
                         )
                     } else {
                         Row(modifier = GlanceModifier.fillMaxWidth()) {
                             Column(modifier = GlanceModifier.defaultWeight()) {
                                 todayPeriods.take(4).forEachIndexed { idx, subject ->
-                                    PeriodRow(idx + 1, subject, Color(0xFF60A5FA))
+                                    PeriodRow(idx + 1, subject, Color(0xFF60A5FA), palette.textPrimary, fs)
                                 }
                             }
                             Spacer(modifier = GlanceModifier.width(6.dp))
                             Column(modifier = GlanceModifier.defaultWeight()) {
                                 todayPeriods.drop(4).take(3).forEachIndexed { idx, subject ->
-                                    PeriodRow(idx + 5, subject, Color(0xFF34D399))
+                                    PeriodRow(idx + 5, subject, Color(0xFF34D399), palette.textPrimary, fs)
                                 }
                             }
                         }
@@ -199,14 +207,14 @@ class SchoolWidget : GlanceAppWidget() {
             Column(
                 modifier = GlanceModifier
                     .fillMaxWidth()
-                    .background(Color(0xFF1E293B))
+                    .background(palette.cardBg)
                     .padding(12.dp)
             ) {
                 Row(modifier = GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = "🍱 $mealTitle",
                         maxLines = 1,
-                        style = TextStyle(color = ColorProvider(Color(0xFFFCD34D)), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        style = TextStyle(color = ColorProvider(palette.accent), fontSize = fs(14), fontWeight = FontWeight.Bold)
                     )
                     if (mealDateLabel.isNotBlank()) {
                         Spacer(modifier = GlanceModifier.width(6.dp))
@@ -218,7 +226,7 @@ class SchoolWidget : GlanceAppWidget() {
                             Text(
                                 text = mealDateLabel,
                                 maxLines = 1,
-                                style = TextStyle(color = ColorProvider(Color(0xFF34D399)), fontSize = 10.sp)
+                                style = TextStyle(color = ColorProvider(Color(0xFF34D399)), fontSize = fs(10))
                             )
                         }
                     }
@@ -227,7 +235,7 @@ class SchoolWidget : GlanceAppWidget() {
                         Text(
                             text = calInfo,
                             maxLines = 1,
-                            style = TextStyle(color = ColorProvider(Color(0xFF94A3B8)), fontSize = 12.sp)
+                            style = TextStyle(color = ColorProvider(palette.textSecondary), fontSize = fs(12))
                         )
                     }
                 }
@@ -236,19 +244,19 @@ class SchoolWidget : GlanceAppWidget() {
                 if (dishes.isEmpty()) {
                     Text(
                         text = todayMeal,
-                        style = TextStyle(color = ColorProvider(Color(0xFFE2E8F0)), fontSize = 12.sp)
+                        style = TextStyle(color = ColorProvider(palette.textPrimary), fontSize = fs(12))
                     )
                 } else {
                     dishes.chunked(2).forEach { rowDishes ->
                         Row(modifier = GlanceModifier.fillMaxWidth()) {
                             rowDishes.forEach { dish ->
                                 Row(modifier = GlanceModifier.defaultWeight(), verticalAlignment = Alignment.Top) {
-                                    Text("• ", style = TextStyle(color = ColorProvider(Color(0xFF34D399)), fontSize = 13.sp))
+                                    Text("• ", style = TextStyle(color = ColorProvider(Color(0xFF34D399)), fontSize = fs(13)))
                                     Text(
                                         text = dish,
                                         maxLines = 2,
                                         modifier = GlanceModifier.defaultWeight(),
-                                        style = TextStyle(color = ColorProvider(Color(0xFFE2E8F0)), fontSize = 13.sp)
+                                        style = TextStyle(color = ColorProvider(palette.textPrimary), fontSize = fs(13))
                                     )
                                 }
                             }
@@ -262,31 +270,31 @@ class SchoolWidget : GlanceAppWidget() {
 
             Spacer(modifier = GlanceModifier.height(8.dp))
 
-            // 5. 할 일 목록 (체크로 완료 표시, 추가/삭제는 앱에서)
+            // 5. 할 일 목록 (체크로 완료 표시, 추가/삭제/순서변경은 앱에서)
             Column(
                 modifier = GlanceModifier
                     .fillMaxWidth()
-                    .background(Color(0xFF1E293B))
+                    .background(palette.cardBg)
                     .padding(12.dp)
             ) {
                 Row(modifier = GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = "✅ 할 일 목록",
                         maxLines = 1,
-                        style = TextStyle(color = ColorProvider(Color(0xFFFBBF24)), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        style = TextStyle(color = ColorProvider(palette.accent), fontSize = fs(14), fontWeight = FontWeight.Bold)
                     )
                     Spacer(modifier = GlanceModifier.defaultWeight())
                     Text(
                         text = "${pendingCount}개 남음",
                         maxLines = 1,
-                        style = TextStyle(color = ColorProvider(Color(0xFF94A3B8)), fontSize = 12.sp)
+                        style = TextStyle(color = ColorProvider(palette.textSecondary), fontSize = fs(12))
                     )
                 }
                 Spacer(modifier = GlanceModifier.height(6.dp))
                 if (todos.isEmpty()) {
                     Text(
                         text = "할 일이 없습니다.",
-                        style = TextStyle(color = ColorProvider(Color(0xFF94A3B8)), fontSize = 12.sp)
+                        style = TextStyle(color = ColorProvider(palette.textSecondary), fontSize = fs(12))
                     )
                 } else {
                     todos.take(8).forEach { todo ->
@@ -300,8 +308,8 @@ class SchoolWidget : GlanceAppWidget() {
                             Text(
                                 text = if (todo.completed) "☑ " else "☐ ",
                                 style = TextStyle(
-                                    color = ColorProvider(if (todo.completed) Color(0xFF4ADE80) else Color(0xFF94A3B8)),
-                                    fontSize = 13.sp
+                                    color = ColorProvider(if (todo.completed) Color(0xFF4ADE80) else palette.textSecondary),
+                                    fontSize = fs(13)
                                 )
                             )
                             Text(
@@ -309,8 +317,8 @@ class SchoolWidget : GlanceAppWidget() {
                                 maxLines = 1,
                                 modifier = GlanceModifier.defaultWeight(),
                                 style = TextStyle(
-                                    color = ColorProvider(if (todo.completed) Color(0xFF64748B) else Color(0xFFE2E8F0)),
-                                    fontSize = 13.sp,
+                                    color = ColorProvider(if (todo.completed) palette.textSecondary else palette.textPrimary),
+                                    fontSize = fs(13),
                                     textDecoration = if (todo.completed) TextDecoration.LineThrough else TextDecoration.None
                                 )
                             )
@@ -324,7 +332,7 @@ class SchoolWidget : GlanceAppWidget() {
                     modifier = GlanceModifier.clickable(
                         actionStartActivity(Intent(context, MainActivity::class.java))
                     ),
-                    style = TextStyle(color = ColorProvider(Color(0xFF38BDF8)), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    style = TextStyle(color = ColorProvider(palette.accent), fontSize = fs(12), fontWeight = FontWeight.Bold)
                 )
             }
 
@@ -336,14 +344,14 @@ class SchoolWidget : GlanceAppWidget() {
                     text = "🔄 새로고침",
                     maxLines = 1,
                     modifier = GlanceModifier.clickable(actionRunCallback<RefreshWidgetAction>()),
-                    style = TextStyle(color = ColorProvider(Color(0xFF38BDF8)), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    style = TextStyle(color = ColorProvider(palette.accent), fontSize = fs(13), fontWeight = FontWeight.Bold)
                 )
             }
         }
     }
 
     @Composable
-    private fun DDayChip(label: DDayLabel, modifier: GlanceModifier) {
+    private fun DDayChip(label: DDayLabel, fs: (Int) -> TextUnit, modifier: GlanceModifier) {
         val (bg, fg) = ddayColors(label.urgency)
         Box(
             modifier = modifier
@@ -355,20 +363,20 @@ class SchoolWidget : GlanceAppWidget() {
                     text = label.title,
                     maxLines = 1,
                     modifier = GlanceModifier.defaultWeight(),
-                    style = TextStyle(color = ColorProvider(fg), fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                    style = TextStyle(color = ColorProvider(fg), fontSize = fs(12), fontWeight = FontWeight.Medium)
                 )
                 Spacer(modifier = GlanceModifier.width(4.dp))
                 Text(
                     text = label.ddayText,
                     maxLines = 1,
-                    style = TextStyle(color = ColorProvider(fg), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    style = TextStyle(color = ColorProvider(fg), fontSize = fs(12), fontWeight = FontWeight.Bold)
                 )
             }
         }
     }
 
     @Composable
-    private fun PeriodRow(periodNumber: Int, subject: String, accent: Color) {
+    private fun PeriodRow(periodNumber: Int, subject: String, accent: Color, textPrimary: Color, fs: (Int) -> TextUnit) {
         Row(
             modifier = GlanceModifier
                 .fillMaxWidth()
@@ -378,13 +386,13 @@ class SchoolWidget : GlanceAppWidget() {
             Text(
                 text = "${periodNumber}교시 ",
                 maxLines = 1,
-                style = TextStyle(color = ColorProvider(accent), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                style = TextStyle(color = ColorProvider(accent), fontSize = fs(12), fontWeight = FontWeight.Bold)
             )
             Text(
                 text = subject.ifBlank { "-" },
                 maxLines = 1,
                 modifier = GlanceModifier.defaultWeight(),
-                style = TextStyle(color = ColorProvider(Color(0xFFE2E8F0)), fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                style = TextStyle(color = ColorProvider(textPrimary), fontSize = fs(12), fontWeight = FontWeight.Medium)
             )
         }
     }

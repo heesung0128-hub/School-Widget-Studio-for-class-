@@ -1,6 +1,7 @@
 package com.school.widget
 
 import android.content.Context
+import androidx.compose.ui.graphics.Color
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
@@ -36,8 +37,68 @@ data class WidgetConfigData(
     val timetable: List<TimetableDay>,
     val todos: List<TodoItemData>,
     val showCalories: Boolean,
-    val mealSwitchTime: String
+    val mealSwitchTime: String,
+    val theme: String,
+    val fontScale: Float
 )
+
+data class WidgetPalette(
+    val containerBg: Color,
+    val cardBg: Color,
+    val textPrimary: Color,
+    val textSecondary: Color,
+    val accent: Color
+)
+
+/**
+ * 스튜디오의 6가지 테마와 동일한 배색 (색상 값은 powerShellGenerator.ts / Widget.tsx와 맞춤).
+ * D-Day 긴급도 색상, 시간표 오전/오후 강조색, 급식 불릿/날짜 배지 색 등은 테마와 무관하게
+ * 데스크톱 위젯과 마찬가지로 고정 색을 그대로 쓴다.
+ */
+fun paletteFor(theme: String): WidgetPalette = when (theme) {
+    "light-acrylic" -> WidgetPalette(
+        containerBg = Color(0xF2FFFFFF),
+        cardBg = Color(0xE6F8FAFC),
+        textPrimary = Color(0xFF1E293B),
+        textSecondary = Color(0xFF64748B),
+        accent = Color(0xFF2563EB)
+    )
+    "emerald-glass" -> WidgetPalette(
+        containerBg = Color(0xE6022C22),
+        cardBg = Color(0x99064E3B),
+        textPrimary = Color(0xFFECFDF5),
+        textSecondary = Color(0xFF6EE7B7),
+        accent = Color(0xFF34D399)
+    )
+    "indigo-glass" -> WidgetPalette(
+        containerBg = Color(0xE61E1B4B),
+        cardBg = Color(0x99312E81),
+        textPrimary = Color(0xFFEEF2FF),
+        textSecondary = Color(0xFFA5B4FC),
+        accent = Color(0xFF818CF8)
+    )
+    "slate-glass" -> WidgetPalette(
+        containerBg = Color(0xD9334155),
+        cardBg = Color(0x99475569),
+        textPrimary = Color(0xFFF8FAFC),
+        textSecondary = Color(0xFFCBD5E1),
+        accent = Color(0xFF38BDF8)
+    )
+    "sakura-glass" -> WidgetPalette(
+        containerBg = Color(0xE6500724),
+        cardBg = Color(0x99831843),
+        textPrimary = Color(0xFFFDF2F8),
+        textSecondary = Color(0xFFF9A8D4),
+        accent = Color(0xFFF472B6)
+    )
+    else -> WidgetPalette( // dark-acrylic (기본값)
+        containerBg = Color(0xE60F172A),
+        cardBg = Color(0xB31E293B),
+        textPrimary = Color(0xFFF1F5F9),
+        textSecondary = Color(0xFF94A3B8),
+        accent = Color(0xFF60A5FA)
+    )
+}
 
 // 스튜디오/딥링크로부터 받는 값이 악의적이거나 손상되었을 가능성을 대비한 안전 한도.
 // (예: 위조된 schoolwidget://import 링크가 지나치게 큰 배열/문자열을 보내 위젯 렌더링을
@@ -101,8 +162,12 @@ fun parseWidgetConfigJson(text: String): WidgetConfigData {
     // 이전 버전에서 저장된 설정 파일에는 이 필드들이 없을 수 있으므로 기본값을 둔다
     val showCalories = root.optBoolean("showCalories", true)
     val mealSwitchTime = root.optString("mealSwitchTime", "13:30").take(5)
+    val theme = root.optString("theme", "dark-acrylic").take(20)
+    // 스튜디오의 글씨 크기 슬라이더(0.85~1.3)와 같은 범위로 제한 - 손상된/악의적인 값이
+    // 지나치게 큰 글씨로 위젯을 보기 흉하게 만들지 못하도록 방어
+    val fontScale = root.optDouble("fontScale", 1.0).toFloat().coerceIn(0.85f, 1.3f)
 
-    return WidgetConfigData(ddays, timetable, todos, showCalories, mealSwitchTime)
+    return WidgetConfigData(ddays, timetable, todos, showCalories, mealSwitchTime, theme, fontScale)
 }
 
 private fun WidgetConfigData.toJson(): JSONObject {
@@ -138,6 +203,8 @@ private fun WidgetConfigData.toJson(): JSONObject {
 
     root.put("showCalories", showCalories)
     root.put("mealSwitchTime", mealSwitchTime)
+    root.put("theme", theme)
+    root.put("fontScale", fontScale.toDouble())
     return root
 }
 
@@ -160,7 +227,7 @@ fun loadWidgetConfig(context: Context): WidgetConfigData {
         }
         parseWidgetConfigJson(text)
     } catch (e: Exception) {
-        WidgetConfigData(emptyList(), emptyList(), emptyList(), true, "13:30")
+        WidgetConfigData(emptyList(), emptyList(), emptyList(), true, "13:30", "dark-acrylic", 1.0f)
     }
 }
 
@@ -194,6 +261,13 @@ fun addTodo(context: Context, text: String) {
 fun deleteTodo(context: Context, todoId: String) {
     val current = loadWidgetConfig(context)
     val updated = current.copy(todos = current.todos.filterNot { it.id == todoId })
+    java.io.File(context.filesDir, INTERNAL_CONFIG_FILENAME).writeText(updated.toJson().toString())
+}
+
+/** 앱의 할 일 관리 화면에서 드래그로 바꾼 순서를 그대로 저장한다. */
+fun reorderTodos(context: Context, newOrder: List<TodoItemData>) {
+    val current = loadWidgetConfig(context)
+    val updated = current.copy(todos = newOrder)
     java.io.File(context.filesDir, INTERNAL_CONFIG_FILENAME).writeText(updated.toJson().toString())
 }
 

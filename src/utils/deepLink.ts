@@ -30,6 +30,8 @@ export function buildImportDeepLink(config: WidgetConfig): string {
     todos: config.todos.map((t) => ({ id: t.id, text: t.text, completed: t.completed })),
     showCalories: config.showCalories,
     mealSwitchTime: config.mealSwitchTime,
+    theme: config.theme,
+    fontScale: config.fontScale,
   };
 
   const encoded = utf8ToBase64Url(JSON.stringify(payload));

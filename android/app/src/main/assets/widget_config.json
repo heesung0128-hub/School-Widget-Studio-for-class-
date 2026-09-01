@@ -17,5 +17,7 @@
     { "id": "3", "text": "학부모 상담 일지 작성", "completed": false }
   ],
   "showCalories": true,
-  "mealSwitchTime": "13:30"
+  "mealSwitchTime": "13:30",
+  "theme": "dark-acrylic",
+  "fontScale": 1.0
 }
