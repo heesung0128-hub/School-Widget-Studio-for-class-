@@ -19,7 +19,6 @@ import androidx.glance.layout.Box
 import androidx.glance.layout.Column
 import androidx.glance.layout.Row
 import androidx.glance.layout.Spacer
-import androidx.glance.layout.defaultWeight
 import androidx.glance.layout.fillMaxSize
 import androidx.glance.layout.fillMaxWidth
 import androidx.glance.layout.height
@@ -172,8 +171,7 @@ class SchoolWidget : GlanceAppWidget() {
                     maxLines = 4,
                     style = TextStyle(
                         color = ColorProvider(Color(0xFFE2E8F0)),
-                        fontSize = 12.sp,
-                        lineHeight = 16.sp
+                        fontSize = 12.sp
                     )
                 )
             }
