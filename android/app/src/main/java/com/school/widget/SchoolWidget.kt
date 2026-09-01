@@ -86,10 +86,7 @@ class SchoolWidget : GlanceAppWidget() {
         todos: List<TodoItemData>
     ) {
         val dateFormat = SimpleDateFormat("M월 d일 (E)", Locale.KOREAN)
-        val timeFormat = SimpleDateFormat("a h:mm", Locale.KOREAN)
-        val now = Date()
-        val todayStr = dateFormat.format(now)
-        val timeStr = timeFormat.format(now)
+        val todayStr = dateFormat.format(Date())
         val pendingCount = todos.count { !it.completed }
 
         Column(
@@ -98,31 +95,22 @@ class SchoolWidget : GlanceAppWidget() {
                 .background(Color(0xE60F172A))
                 .padding(16.dp)
         ) {
-            // 1. 헤더: 날짜 + 시간(크게) + 학교명
+            // 1. 헤더: 날짜(크게) + 학교명
+            // 시간은 표시하지 않는다 - 위젯은 15분 주기로만 갱신되어 실시간 시계가 아니므로,
+            // 마지막 갱신 시각을 시계처럼 보여주면 오해를 준다는 피드백에 따라 제거함.
             Row(
                 modifier = GlanceModifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = GlanceModifier.defaultWeight()) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = todayStr,
-                            style = TextStyle(
-                                color = ColorProvider(Color(0xFF94A3B8)),
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium
-                            )
+                    Text(
+                        text = todayStr,
+                        style = TextStyle(
+                            color = ColorProvider(Color.White),
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold
                         )
-                        Spacer(modifier = GlanceModifier.width(8.dp))
-                        Text(
-                            text = timeStr,
-                            style = TextStyle(
-                                color = ColorProvider(Color.White),
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        )
-                    }
+                    )
                     Text(
                         text = schoolName,
                         style = TextStyle(
