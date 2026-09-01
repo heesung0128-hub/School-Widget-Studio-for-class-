@@ -17,6 +17,19 @@ android {
         versionName = "1.0.0"
     }
 
+    // 고정된 debug.keystore를 커밋해두고 명시적으로 사용한다. CI 러너마다 기본
+    // ~/.android/debug.keystore가 새로 생성되면 빌드할 때마다 서명 키가 달라져서,
+    // 태블릿에 이미 설치된 앱 위에 새 APK를 업데이트 설치할 때 서명 불일치로
+    // 실패("앱이 설치되지 않았습니다")하기 때문에 고정 키가 필요하다.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
