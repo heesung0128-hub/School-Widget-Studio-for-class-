@@ -8,6 +8,7 @@ export interface AndroidCodeFiles {
   'NeisMealService.kt': string;
   'WidgetUpdateWorker.kt': string;
   'MainActivity.kt': string;
+  'widget_config.json': string;
   'README_ANDROID.md': string;
 }
 
@@ -15,6 +16,7 @@ export function generateAndroidProjectFiles(config: WidgetConfig): AndroidCodeFi
   const schoolName = config.school.schoolName;
   const orgCode = config.school.officeCode;
   const schoolCode = config.school.schoolCode;
+  const { ddays, timetable } = config;
 
   // 1. build.gradle.kts (App level)
   const buildGradle = `plugins {
@@ -698,6 +700,18 @@ fun SchoolWidgetSettingsScreen(
 }
 `;
 
+  // 7.5 widget_config.json — 저장소의 android/app/src/main/assets/widget_config.json 을
+  // 이 파일로 덮어쓰고 커밋/푸시하면, GitHub Actions가 다시 빌드한 위젯에 D-Day와 시간표가
+  // 그대로 반영된다 (Kotlin 코드 수정이나 Android Studio 없이 시간표/D-Day만 바꾸는 방법).
+  const widgetConfigJson = JSON.stringify(
+    {
+      ddays: ddays.map((d) => ({ id: d.id, title: d.title, targetDate: d.targetDate })),
+      timetable: timetable.map((t) => ({ day: t.day, periods: t.periods })),
+    },
+    null,
+    2
+  );
+
   // 8. README_ANDROID.md (안드로이드 스튜디오에서 3분 만에 빌드/실행하는 완벽 가이드)
   const readme = `# 📱 학교 생활 안드로이드 태블릿 & 스마트폰 위젯
 
@@ -746,6 +760,7 @@ fun SchoolWidgetSettingsScreen(
     'NeisMealService.kt': neisMealServiceKt,
     'WidgetUpdateWorker.kt': workerKt,
     'MainActivity.kt': mainActivityKt,
+    'widget_config.json': widgetConfigJson,
     'README_ANDROID.md': readme,
   };
 }

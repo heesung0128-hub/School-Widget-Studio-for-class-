@@ -31,6 +31,7 @@ Android Studio를 열거나, 파일을 복사-붙여넣기 하거나, USB로 PC�
 
 | 바꾸고 싶은 것 | 수정할 파일 |
 | --- | --- |
+| **시간표 / D-Day** (코딩 불필요) | 웹 스튜디오의 [📱 안드로이드 (태블릿) 위젯] 탭에서 `widget_config.json`을 다운로드해 [`app/src/main/assets/widget_config.json`](app/src/main/assets/widget_config.json)에 덮어쓰기 |
 | 위젯 디자인/레이아웃/색상/문구 | [`SchoolWidget.kt`](app/src/main/java/com/school/widget/SchoolWidget.kt) |
 | 급식 자동 전환 시각(13:30), 알레르기 표기 등 급식 로직 | [`NeisMealService.kt`](app/src/main/java/com/school/widget/NeisMealService.kt) |
 | 자동 갱신 주기(현재 15분) | [`MainActivity.kt`](app/src/main/java/com/school/widget/MainActivity.kt), [`BootReceiver.kt`](app/src/main/java/com/school/widget/BootReceiver.kt) (두 곳의 `PeriodicWorkRequestBuilder` 시간을 동일하게 맞춰야 합니다) |

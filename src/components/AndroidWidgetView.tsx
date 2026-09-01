@@ -43,6 +43,7 @@ export const AndroidWidgetView: React.FC<AndroidWidgetViewProps> = ({ config }) 
     'SchoolWidgetReceiver.kt': '안드로이드 OS 위젯 브로드캐스트 수신 클래스',
     'AndroidManifest.xml': '인터넷 권한 및 위젯 프로바이더 등록 메타데이터',
     'build.gradle.kts': 'Jetpack Glance, Compose, WorkManager, OkHttp 의존성 설정',
+    'widget_config.json': '지금 설정된 시간표 & D-Day. 저장소의 android/app/src/main/assets/widget_config.json 을 이 파일로 덮어쓰고 푸시하면 자동 빌드된 위젯에 바로 반영됩니다 (코딩 불필요).',
     'README_ANDROID.md': '안드로이드 스튜디오 3분 빌드 & 태블릿 위젯 추가 가이드',
   };
 
@@ -124,6 +125,8 @@ export const AndroidWidgetView: React.FC<AndroidWidgetViewProps> = ({ config }) 
               저장소의 <code className="text-blue-300">android/</code> 폴더는 GitHub Actions가 자동으로 빌드하는 완전한 프로젝트입니다.
               저장소의 <strong>Releases</strong> 탭에서 최신 <code className="text-blue-300">app-debug.apk</code> 파일을
               태블릿으로 바로 다운로드해 설치하면, Android Studio 설치·파일 복사·USB 연결 없이 위젯을 쓸 수 있습니다.
+              시간표나 D-Day를 바꾸고 싶다면 아래 탭에서 <code className="text-blue-300">widget_config.json</code>을 다운로드해
+              저장소의 <code className="text-blue-300">android/app/src/main/assets/widget_config.json</code>에 덮어쓰고 푸시하세요.
             </p>
           </div>
         </div>

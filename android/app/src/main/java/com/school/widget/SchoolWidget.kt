@@ -46,14 +46,19 @@ class SchoolWidget : GlanceAppWidget() {
             ?: NeisMealService.DEFAULT_SCHOOL_NAME
         val todayMeal = prefs.getString("today_meal", "급식 정보를 불러오는 중입니다...") ?: ""
         val calInfo = prefs.getString("meal_calories", "") ?: ""
-        val currentPeriod = getCurrentPeriodInfo()
+
+        val config = loadWidgetConfig(context)
+        val currentPeriod = getCurrentPeriodLabel(config)
+        val dday = nextDDayLabel(config.ddays)
 
         provideContent {
             WidgetContent(
                 schoolName = schoolName,
                 todayMeal = todayMeal,
                 calInfo = calInfo,
-                currentPeriod = currentPeriod
+                currentPeriod = currentPeriod,
+                ddayTitle = dday?.first,
+                ddayText = dday?.second
             )
         }
     }
@@ -63,7 +68,9 @@ class SchoolWidget : GlanceAppWidget() {
         schoolName: String,
         todayMeal: String,
         calInfo: String,
-        currentPeriod: String
+        currentPeriod: String,
+        ddayTitle: String?,
+        ddayText: String?
     ) {
         val dateFormat = SimpleDateFormat("M월 d일 (E)", Locale.KOREAN)
         val todayStr = dateFormat.format(Date())
@@ -74,13 +81,13 @@ class SchoolWidget : GlanceAppWidget() {
                 .background(Color(0xE60F172A)) // 반투명 슬레이트 다크 아크릴 테마
                 .padding(16.dp)
         ) {
-            // 1. 헤더: 날짜 및 학교명
+            // 1. 헤더: 날짜, 학교명, D-Day 뱃지
             Row(
                 modifier = GlanceModifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalAlignment = Alignment.Start
             ) {
-                Column {
+                Column(modifier = GlanceModifier.defaultWeight()) {
                     Text(
                         text = todayStr,
                         style = TextStyle(
@@ -97,6 +104,24 @@ class SchoolWidget : GlanceAppWidget() {
                             fontWeight = FontWeight.Bold
                         )
                     )
+                }
+
+                if (ddayText != null) {
+                    Box(
+                        modifier = GlanceModifier
+                            .background(Color(0x333B82F6))
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = "${ddayTitle ?: ""} $ddayText",
+                            maxLines = 1,
+                            style = TextStyle(
+                                color = ColorProvider(Color(0xFF60A5FA)),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        )
+                    }
                 }
             }
 
@@ -197,23 +222,61 @@ class SchoolWidget : GlanceAppWidget() {
         }
     }
 
-    private fun getCurrentPeriodInfo(): String {
+    /** 현재 시각이 몇 교시인지(1~7)만 계산. 쉬는시간/등교전/방과후 등은 null. */
+    private fun getCurrentPeriodNumber(): Int? {
         val cal = Calendar.getInstance()
-        val hour = cal.get(Calendar.HOUR_OF_DAY)
-        val min = cal.get(Calendar.MINUTE)
-        val currentMins = hour * 60 + min
+        val currentMins = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
+        return when {
+            currentMins in (9 * 60)..(9 * 60 + 50) -> 1
+            currentMins in (10 * 60)..(10 * 60 + 50) -> 2
+            currentMins in (11 * 60)..(11 * 60 + 50) -> 3
+            currentMins in (12 * 60)..(12 * 60 + 50) -> 4
+            currentMins in (13 * 60 + 50)..(14 * 60 + 40) -> 5
+            currentMins in (14 * 60 + 50)..(15 * 60 + 40) -> 6
+            currentMins in (15 * 60 + 50)..(16 * 60 + 40) -> 7
+            else -> null
+        }
+    }
+
+    private fun todayKoreanDay(): String {
+        val cal = Calendar.getInstance()
+        return when (cal.get(Calendar.DAY_OF_WEEK)) {
+            Calendar.MONDAY -> "월"
+            Calendar.TUESDAY -> "화"
+            Calendar.WEDNESDAY -> "수"
+            Calendar.THURSDAY -> "목"
+            Calendar.FRIDAY -> "금"
+            Calendar.SATURDAY -> "토"
+            else -> "일"
+        }
+    }
+
+    /** widget_config.json의 시간표에서 실제 과목명을 찾아 "N교시 · 과목명" 형태로 만든다. */
+    private fun getCurrentPeriodLabel(config: WidgetConfigData): String {
+        val cal = Calendar.getInstance()
+        val currentMins = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
+        val todayDay = todayKoreanDay()
+
+        if (todayDay == "토" || todayDay == "일") return "주말입니다 🎉"
+
+        val periodNumber = getCurrentPeriodNumber()
+        if (periodNumber != null) {
+            val subject = config.timetable
+                .find { it.day == todayDay }
+                ?.periods
+                ?.getOrNull(periodNumber - 1)
+            return if (!subject.isNullOrBlank() && subject != "-") {
+                "${periodNumber}교시 · $subject"
+            } else {
+                "${periodNumber}교시"
+            }
+        }
 
         return when {
             currentMins < 9 * 60 -> "등교 / 수업 준비 시간"
-            currentMins in (9 * 60)..(9 * 60 + 50) -> "1교시"
-            currentMins in (10 * 60)..(10 * 60 + 50) -> "2교시"
-            currentMins in (11 * 60)..(11 * 60 + 50) -> "3교시"
-            currentMins in (12 * 60)..(12 * 60 + 50) -> "4교시"
             currentMins in (12 * 60 + 50)..(13 * 60 + 50) -> "점심시간 🍚"
-            currentMins in (13 * 60 + 50)..(14 * 60 + 40) -> "5교시"
-            currentMins in (14 * 60 + 50)..(15 * 60 + 40) -> "6교시"
-            currentMins in (15 * 60 + 50)..(16 * 60 + 40) -> "7교시"
-            else -> "일과 후 / 방과후 활동"
+            currentMins > 16 * 60 + 40 -> "일과 후 / 방과후 활동"
+            else -> "쉬는 시간"
         }
     }
 }
