@@ -1,6 +1,7 @@
 package com.school.widget
 
 import android.content.Context
+import android.content.Intent
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -59,6 +60,7 @@ class SchoolWidget : GlanceAppWidget() {
 
         provideContent {
             WidgetContent(
+                context = context,
                 schoolName = schoolName,
                 todayMeal = todayMeal,
                 calInfo = calInfo,
@@ -73,6 +75,7 @@ class SchoolWidget : GlanceAppWidget() {
 
     @Composable
     private fun WidgetContent(
+        context: Context,
         schoolName: String,
         todayMeal: String,
         calInfo: String,
@@ -302,7 +305,9 @@ class SchoolWidget : GlanceAppWidget() {
                 Spacer(modifier = GlanceModifier.height(4.dp))
                 Text(
                     text = "+ 할 일 추가/관리",
-                    modifier = GlanceModifier.clickable(actionStartActivity<MainActivity>()),
+                    modifier = GlanceModifier.clickable(
+                        actionStartActivity(Intent(context, MainActivity::class.java))
+                    ),
                     style = TextStyle(color = ColorProvider(Color(0xFF38BDF8)), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 )
             }
