@@ -16,6 +16,7 @@ import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.action.actionStartActivity
+import androidx.glance.appwidget.lazy.LazyColumn
 import androidx.glance.appwidget.provideContent
 import androidx.glance.background
 import androidx.glance.layout.Alignment
@@ -103,12 +104,16 @@ class SchoolWidget : GlanceAppWidget() {
         val todayStr = dateFormat.format(Date())
         val pendingCount = todos.count { !it.completed }
 
-        Column(
+        // 위젯이 홈 화면/전자칠판 런처에서 짧게 배치되면 Column은 스크롤이 안 돼서
+        // 아래쪽 섹션(할 일 목록 등)이 그냥 잘려서 안 보이는 문제가 있었다. LazyColumn으로
+        // 감싸면 위젯 안에서 손가락으로 스크롤해 나머지 내용을 볼 수 있다.
+        LazyColumn(
             modifier = GlanceModifier
                 .fillMaxSize()
                 .background(palette.containerBg)
-                .padding(16.dp)
         ) {
+            item {
+                Column(modifier = GlanceModifier.fillMaxWidth().padding(16.dp)) {
             // 1. 헤더: 날짜 + 학교명 (한 줄)
             // 시간은 표시하지 않는다 - 위젯은 15분 주기로만 갱신되어 실시간 시계가 아니므로,
             // 마지막 갱신 시각을 시계처럼 보여주면 오해를 준다는 피드백에 따라 제거함.
@@ -170,7 +175,7 @@ class SchoolWidget : GlanceAppWidget() {
             ) {
                 Column {
                     Text(
-                        text = "시간표 ($todayDay)",
+                        text = "🕐 시간표 ($todayDay)",
                         style = TextStyle(
                             color = ColorProvider(palette.accent),
                             fontSize = fs(14),
@@ -346,6 +351,8 @@ class SchoolWidget : GlanceAppWidget() {
                     modifier = GlanceModifier.clickable(actionRunCallback<RefreshWidgetAction>()),
                     style = TextStyle(color = ColorProvider(palette.accent), fontSize = fs(13), fontWeight = FontWeight.Bold)
                 )
+            }
+                }
             }
         }
     }
