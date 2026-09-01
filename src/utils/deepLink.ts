@@ -27,6 +27,8 @@ export function buildImportDeepLink(config: WidgetConfig): string {
     },
     ddays: config.ddays.map((d) => ({ title: d.title, targetDate: d.targetDate })),
     timetable: config.timetable.map((t) => ({ day: t.day, periods: t.periods })),
+    todos: config.todos.map((t) => ({ id: t.id, text: t.text, completed: t.completed })),
+    showCalories: config.showCalories,
   };
 
   const encoded = utf8ToBase64Url(JSON.stringify(payload));

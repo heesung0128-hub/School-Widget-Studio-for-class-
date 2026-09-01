@@ -42,10 +42,12 @@ object NeisMealService {
             val ymdFormat = SimpleDateFormat("yyyyMMdd", Locale.KOREA)
             val targetYmd = ymdFormat.format(cal.time)
 
+            // orgCode/schoolCode는 딥링크로 외부에서 전달될 수 있는 값이므로, 요청 URL에
+            // 그대로 이어붙이지 않고 인코딩한다 (쿼리 문자열 조작 방지).
             val url = "https://open.neis.go.kr/hub/mealServiceDietInfo" +
                 "?Type=json&pIndex=1&pSize=5" +
-                "&ATPT_OFCDC_SC_CODE=$orgCode" +
-                "&SD_SCHUL_CODE=$schoolCode" +
+                "&ATPT_OFCDC_SC_CODE=${android.net.Uri.encode(orgCode)}" +
+                "&SD_SCHUL_CODE=${android.net.Uri.encode(schoolCode)}" +
                 "&MLSV_YMD=$targetYmd"
 
             val request = Request.Builder().url(url).build()

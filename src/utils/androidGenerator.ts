@@ -16,7 +16,7 @@ export function generateAndroidProjectFiles(config: WidgetConfig): AndroidCodeFi
   const schoolName = config.school.schoolName;
   const orgCode = config.school.officeCode;
   const schoolCode = config.school.schoolCode;
-  const { ddays, timetable } = config;
+  const { ddays, timetable, todos, showCalories } = config;
 
   // 1. build.gradle.kts (App level)
   const buildGradle = `plugins {
@@ -707,6 +707,8 @@ fun SchoolWidgetSettingsScreen(
     {
       ddays: ddays.map((d) => ({ id: d.id, title: d.title, targetDate: d.targetDate })),
       timetable: timetable.map((t) => ({ day: t.day, periods: t.periods })),
+      todos: todos.map((t) => ({ id: t.id, text: t.text, completed: t.completed })),
+      showCalories,
     },
     null,
     2

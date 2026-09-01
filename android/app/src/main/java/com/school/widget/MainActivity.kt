@@ -14,24 +14,33 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.TabletAndroid
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.darkColorScheme
@@ -44,6 +53,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.work.Constraints
@@ -56,21 +66,30 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
+// 딥링크로 넘어온 값이 지나치게 크면(위조/손상 가능성) 아예 파싱을 시도하지 않는다.
+private const val MAX_IMPORT_PAYLOAD_CHARS = 20_000
+
+private data class PendingImport(
+    val schoolName: String?,
+    val orgCode: String?,
+    val schoolCode: String?,
+    val ddayCount: Int,
+    val timetableDayCount: Int,
+    val todoCount: Int,
+    val configJson: String
+)
+
 class MainActivity : ComponentActivity() {
-    // 클래스 필드에 Compose State로 보관해두면, 앱이 이미 켜져 있는 상태에서
-    // 딥링크(onNewIntent)로 설정이 들어와도 액티비티를 재시작하지 않고 화면이 바로 갱신된다.
     private val schoolNameState = mutableStateOf("")
     private val statusMessageState = mutableStateOf<String?>(null)
+    private val pendingImportState = mutableStateOf<PendingImport?>(null)
+    private val todosState = mutableStateOf<List<TodoItemData>>(emptyList())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         schedulePeriodicWidgetSync()
-
-        val prefs = getSharedPreferences("school_widget_prefs", MODE_PRIVATE)
-        schoolNameState.value = prefs.getString("school_name", NeisMealService.DEFAULT_SCHOOL_NAME)
-            ?: NeisMealService.DEFAULT_SCHOOL_NAME
-
+        refreshFromStorage()
         handleImportIntent(intent)
 
         setContent {
@@ -85,6 +104,8 @@ class MainActivity : ComponentActivity() {
                     SchoolWidgetSettingsScreen(
                         currentSchool = schoolNameState.value,
                         statusMessage = statusMessageState.value,
+                        pendingImport = pendingImportState.value,
+                        todos = todosState.value,
                         onSaveSchoolName = { name ->
                             schoolNameState.value = name
                             getSharedPreferences("school_widget_prefs", MODE_PRIVATE)
@@ -92,7 +113,22 @@ class MainActivity : ComponentActivity() {
                                 .putString("school_name", name)
                                 .apply()
                         },
-                        onRefreshMeal = {
+                        onRefreshMeal = { scheduleImmediateSync() },
+                        onConfirmImport = { applyPendingImport() },
+                        onCancelImport = { pendingImportState.value = null },
+                        onAddTodo = { text ->
+                            addTodo(this, text)
+                            refreshFromStorage()
+                            scheduleImmediateSync()
+                        },
+                        onToggleTodo = { id ->
+                            toggleTodoCompleted(this, id)
+                            refreshFromStorage()
+                            scheduleImmediateSync()
+                        },
+                        onDeleteTodo = { id ->
+                            deleteTodo(this, id)
+                            refreshFromStorage()
                             scheduleImmediateSync()
                         }
                     )
@@ -107,47 +143,81 @@ class MainActivity : ComponentActivity() {
         handleImportIntent(intent)
     }
 
+    private fun refreshFromStorage() {
+        val prefs = getSharedPreferences("school_widget_prefs", MODE_PRIVATE)
+        schoolNameState.value = prefs.getString("school_name", NeisMealService.DEFAULT_SCHOOL_NAME)
+            ?: NeisMealService.DEFAULT_SCHOOL_NAME
+        todosState.value = loadWidgetConfig(this).todos
+    }
+
     /**
      * 웹 스튜디오의 "이 기기에 적용하기" 버튼이나 QR코드가 여는
      * schoolwidget://import?config=<base64url(JSON)> 딥링크를 처리한다.
-     * JSON 형태: { "school": {officeCode, schoolCode, schoolName}, "ddays": [...], "timetable": [...] }
+     *
+     * 보안: 다른 앱/웹페이지도 이 딥링크를 열 수 있으므로(android:exported, BROWSABLE),
+     * 내용을 절대 조용히 바로 적용하지 않고 먼저 요약을 보여준 뒤 사용자가 확인해야
+     * 실제로 저장된다. 페이로드 크기도 제한해 손상/악의적인 링크로부터 보호한다.
      */
     private fun handleImportIntent(intent: Intent?): Boolean {
         val data = intent?.data ?: return false
         if (data.scheme != "schoolwidget" || data.host != "import") return false
         val encoded = data.getQueryParameter("config") ?: return false
+        if (encoded.length > MAX_IMPORT_PAYLOAD_CHARS) {
+            statusMessageState.value = "⚠️ 전달된 설정이 너무 커서 무시했습니다."
+            return false
+        }
 
         return try {
             val jsonText = decodeBase64UrlToString(encoded)
             val root = JSONObject(jsonText)
-
             val schoolObj = root.optJSONObject("school")
-            if (schoolObj != null) {
-                val newSchoolName = schoolObj.optString("schoolName", NeisMealService.DEFAULT_SCHOOL_NAME)
-                getSharedPreferences("school_widget_prefs", MODE_PRIVATE)
-                    .edit()
-                    .putString("school_name", newSchoolName)
-                    .putString("org_code", schoolObj.optString("officeCode", NeisMealService.DEFAULT_ATPT_OFCDC_SC_CODE))
-                    .putString("school_code", schoolObj.optString("schoolCode", NeisMealService.DEFAULT_SD_SCHUL_CODE))
-                    .apply()
-                schoolNameState.value = newSchoolName
-            }
 
             val configPayload = JSONObject()
             configPayload.put("ddays", root.optJSONArray("ddays") ?: JSONArray())
             configPayload.put("timetable", root.optJSONArray("timetable") ?: JSONArray())
-            saveWidgetConfig(this, configPayload.toString())
+            configPayload.put("todos", root.optJSONArray("todos") ?: JSONArray())
+            configPayload.put("showCalories", root.optBoolean("showCalories", true))
 
-            // 위젯 및 급식 정보 즉시 갱신
-            scheduleImmediateSync()
+            // 안전 한도(길이/개수 제한)를 적용한 뒤의 실제 값으로 요약을 보여준다
+            val parsed = parseWidgetConfigJson(configPayload.toString())
 
-            statusMessageState.value = "✅ 스튜디오에서 보낸 학교 정보/시간표/D-Day를 적용했습니다."
-            Toast.makeText(this, "학교 설정을 적용했습니다", Toast.LENGTH_LONG).show()
+            pendingImportState.value = PendingImport(
+                schoolName = schoolObj?.optString("schoolName")?.take(60),
+                orgCode = schoolObj?.optString("officeCode")?.take(10),
+                schoolCode = schoolObj?.optString("schoolCode")?.take(10),
+                ddayCount = parsed.ddays.size,
+                timetableDayCount = parsed.timetable.size,
+                todoCount = parsed.todos.size,
+                configJson = configPayload.toString()
+            )
             true
         } catch (e: Exception) {
-            statusMessageState.value = "⚠️ 설정을 적용하지 못했습니다. 링크가 손상되었을 수 있습니다."
+            statusMessageState.value = "⚠️ 설정을 불러오지 못했습니다. 링크가 손상되었을 수 있습니다."
             false
         }
+    }
+
+    private fun applyPendingImport() {
+        val pending = pendingImportState.value ?: return
+        val prefsEditor = getSharedPreferences("school_widget_prefs", MODE_PRIVATE).edit()
+        if (!pending.schoolName.isNullOrBlank()) {
+            prefsEditor.putString("school_name", pending.schoolName)
+        }
+        if (!pending.orgCode.isNullOrBlank()) {
+            prefsEditor.putString("org_code", pending.orgCode)
+        }
+        if (!pending.schoolCode.isNullOrBlank()) {
+            prefsEditor.putString("school_code", pending.schoolCode)
+        }
+        prefsEditor.apply()
+
+        saveWidgetConfig(this, pending.configJson)
+        refreshFromStorage()
+        scheduleImmediateSync()
+
+        statusMessageState.value = "✅ 스튜디오에서 보낸 설정을 적용했습니다."
+        Toast.makeText(this, "학교 설정을 적용했습니다", Toast.LENGTH_LONG).show()
+        pendingImportState.value = null
     }
 
     private fun decodeBase64UrlToString(encoded: String): String {
@@ -184,11 +254,47 @@ class MainActivity : ComponentActivity() {
 fun SchoolWidgetSettingsScreen(
     currentSchool: String,
     statusMessage: String?,
+    pendingImport: PendingImport?,
+    todos: List<TodoItemData>,
     onSaveSchoolName: (String) -> Unit,
-    onRefreshMeal: () -> Unit
+    onRefreshMeal: () -> Unit,
+    onConfirmImport: () -> Unit,
+    onCancelImport: () -> Unit,
+    onAddTodo: (String) -> Unit,
+    onToggleTodo: (String) -> Unit,
+    onDeleteTodo: (String) -> Unit
 ) {
     var schoolInput by remember(currentSchool) { mutableStateOf(currentSchool) }
     var snackbarVisible by remember { mutableStateOf(false) }
+    var newTodoText by remember { mutableStateOf("") }
+
+    if (pendingImport != null) {
+        AlertDialog(
+            onDismissRequest = onCancelImport,
+            title = { Text("이 설정을 적용할까요?") },
+            text = {
+                Column {
+                    if (!pendingImport.schoolName.isNullOrBlank()) {
+                        Text("학교: ${pendingImport.schoolName}")
+                    }
+                    Text("시간표: ${pendingImport.timetableDayCount}일치")
+                    Text("D-Day: ${pendingImport.ddayCount}개")
+                    Text("할 일: ${pendingImport.todoCount}개")
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "웹 스튜디오에서 보낸 링크가 아니라면 취소하세요.",
+                        color = Color(0xFF94A3B8)
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = onConfirmImport) { Text("적용") }
+            },
+            dismissButton = {
+                TextButton(onClick = onCancelImport) { Text("취소") }
+            }
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -208,7 +314,6 @@ fun SchoolWidgetSettingsScreen(
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // 안내 카드
             Card(
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
                 shape = RoundedCornerShape(16.dp)
@@ -240,7 +345,6 @@ fun SchoolWidgetSettingsScreen(
                 }
             }
 
-            // 딥링크로 시간표/D-Day를 가져올 수 있다는 안내
             Card(
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
                 shape = RoundedCornerShape(16.dp)
@@ -264,7 +368,7 @@ fun SchoolWidgetSettingsScreen(
                             fontSize = 15.sp
                         )
                         Text(
-                            text = "이 기기 브라우저에서 웹 스튜디오를 열고 [이 기기에 적용하기]를 누르면, 다시 앱을 설치하지 않고도 시간표와 D-Day가 여기 바로 반영됩니다.",
+                            text = "이 기기 브라우저에서 웹 스튜디오를 열고 [이 기기에 적용하기]를 누르면 여기서 확인 후 반영됩니다.",
                             color = Color(0xFF94A3B8),
                             fontSize = 12.sp
                         )
@@ -280,7 +384,6 @@ fun SchoolWidgetSettingsScreen(
                 )
             }
 
-            // 학교 표시 이름 설정
             OutlinedTextField(
                 value = schoolInput,
                 onValueChange = {
@@ -296,7 +399,6 @@ fun SchoolWidgetSettingsScreen(
                 )
             )
 
-            // 나이스 동기화 버튼
             Button(
                 onClick = {
                     onRefreshMeal()
@@ -317,6 +419,71 @@ fun SchoolWidgetSettingsScreen(
                     color = Color(0xFF4ADE80),
                     fontSize = 13.sp
                 )
+            }
+
+            // 할 일 목록 관리 (위젯에서는 체크만 가능, 추가/삭제는 여기서)
+            Text(
+                text = "할 일 목록 (${todos.count { !it.completed }}개 남음)",
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                fontSize = 15.sp
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = newTodoText,
+                    onValueChange = { newTodoText = it },
+                    label = { Text("새 할 일") },
+                    modifier = Modifier.weight(1f),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFF38BDF8),
+                        unfocusedBorderColor = Color(0xFF334155)
+                    )
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                IconButton(onClick = {
+                    if (newTodoText.isNotBlank()) {
+                        onAddTodo(newTodoText)
+                        newTodoText = ""
+                    }
+                }) {
+                    Icon(Icons.Default.Add, contentDescription = "추가", tint = Color(0xFF38BDF8))
+                }
+            }
+
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f, fill = false),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                items(todos, key = { it.id }) { todo ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(onClick = { onToggleTodo(todo.id) }) {
+                            Icon(
+                                if (todo.completed) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                                contentDescription = null,
+                                tint = if (todo.completed) Color(0xFF4ADE80) else Color(0xFF94A3B8)
+                            )
+                        }
+                        Text(
+                            text = todo.text,
+                            modifier = Modifier.weight(1f),
+                            color = if (todo.completed) Color(0xFF64748B) else Color(0xFFE2E8F0),
+                            textDecoration = if (todo.completed) TextDecoration.LineThrough else TextDecoration.None,
+                            fontSize = 14.sp
+                        )
+                        IconButton(onClick = { onDeleteTodo(todo.id) }) {
+                            Icon(Icons.Default.Delete, contentDescription = "삭제", tint = Color(0xFF94A3B8))
+                        }
+                    }
+                }
             }
         }
     }
