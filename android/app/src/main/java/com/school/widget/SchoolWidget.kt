@@ -304,7 +304,7 @@ class SchoolWidget : GlanceAppWidget() {
                         style = TextStyle(color = ColorProvider(palette.textSecondary), fontSize = fs(12))
                     )
                 } else {
-                    todos.take(4).forEach { todo ->
+                    todos.take(10).forEach { todo ->
                         Row(
                             modifier = GlanceModifier
                                 .fillMaxWidth()
@@ -330,9 +330,9 @@ class SchoolWidget : GlanceAppWidget() {
                             )
                         }
                     }
-                    if (todos.size > 4) {
+                    if (todos.size > 10) {
                         Text(
-                            text = "+${todos.size - 4}개 더 (앱에서 확인)",
+                            text = "+${todos.size - 10}개 더 (앱에서 확인)",
                             maxLines = 1,
                             style = TextStyle(color = ColorProvider(palette.textSecondary), fontSize = fs(11))
                         )
