@@ -35,7 +35,7 @@ import {
 } from 'lucide-react';
 import { generatePowerShellScript, generateAllInOneBat } from './utils/powerShellGenerator';
 
-const STORAGE_KEY = 'school_widget_config_v1';
+const STORAGE_KEY = 'school_widget_config_mobile_v1';
 
 const DEFAULT_CONFIG: WidgetConfig = {
   school: DEFAULT_SCHOOL,
