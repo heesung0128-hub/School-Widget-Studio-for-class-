@@ -31,6 +31,37 @@ Android Studio를 열거나, 파일을 복사-붙여넣기 하거나, USB로 PC�
 이 방식은 각 기기의 앱 내부 저장소에만 설정이 저장되므로, 기기마다 서로 다른 학교/시간표를 쓸 수 있고
 클라우드 동기화나 서버 없이도 동작합니다. (반대로, 기기를 초기화하거나 앱을 지우면 다시 적용해야 합니다.)
 
+## 할 일 목록을 폰으로 편하게 수정하고 싶을 때 (실시간 편집)
+
+전자칠판처럼 자체 키보드로 타이핑하기 불편한 기기를 위한 기능입니다. 앱의 설정 화면에서
+**[실시간 편집 시작]**을 누르면 QR코드가 뜨고, 학생/교사가 자기 폰 카메라로 스캔하면
+폰 브라우저에서 할 일 목록만 간단히 편집하는 페이지([`mobile-edit.html`](../public/mobile-edit.html))가
+열립니다. 폰에서 체크/추가/삭제할 때마다 몇 초 안에 자동으로 이 기기의 위젯에 반영됩니다
+([`FirestoreSessionClient.kt`](app/src/main/java/com/school/widget/FirestoreSessionClient.kt)가
+Google Firestore의 REST API로 두 기기를 중계합니다 - Firebase SDK나 `google-services.json` 없이,
+이미 있는 OkHttp로 GET/PATCH 요청만 보내는 방식이라 앱이 무거워지지 않습니다).
+
+이 기능을 쓰려면 Firestore 프로젝트가 하나 필요합니다 (무료):
+1. https://console.firebase.google.com 에서 프로젝트 생성 → **빌드 → Firestore Database** →
+   **테스트 모드**로 데이터베이스 생성.
+2. **규칙(Rules)** 탭에서 아래 내용으로 교체하고 게시 (이 컬렉션만 열어두고 나머지는 기본값 유지):
+   ```
+   rules_version = '2';
+   service cloud.firestore {
+     match /databases/{database}/documents {
+       match /widgetSessions/{sessionId} {
+         allow read, write: if true;
+       }
+     }
+   }
+   ```
+3. 프로젝트 설정에서 **프로젝트 ID**를 확인해, [`FirestoreSessionClient.kt`](app/src/main/java/com/school/widget/FirestoreSessionClient.kt)의
+   `PROJECT_ID`와 [`public/mobile-edit.html`](../public/mobile-edit.html)의 `PROJECT_ID`
+   두 곳을 같은 값으로 맞춥니다.
+
+세션 코드는 무작위 6자리라 추측하긴 어렵지만 그 자체가 접근 제어는 아니므로, 규칙은 반드시
+`widgetSessions` 컬렉션에만 열어두세요. 편집이 끝나면 [편집 종료]를 눌러 세션 문서를 정리합니다.
+
 ## 위젯을 수정하고 싶을 때 (공통 흐름)
 
 무엇을 바꾸든 흐름은 항상 동일합니다.

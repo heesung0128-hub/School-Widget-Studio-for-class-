@@ -1,12 +1,15 @@
 package com.school.widget
 
 import android.content.Intent
+import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
 import android.util.Base64
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -17,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -28,6 +32,7 @@ import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.School
@@ -58,18 +63,25 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.lifecycleScope
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.qrcode.QRCodeWriter
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
@@ -87,11 +99,19 @@ private data class PendingImport(
     val configJson: String
 )
 
+private const val MOBILE_EDIT_BASE_URL =
+    "https://heesung0128-hub.github.io/School-Widget-Studio-for-class-/mobile-edit.html"
+private const val LIVE_SESSION_POLL_INTERVAL_MS = 4000L
+
 class MainActivity : ComponentActivity() {
     private val schoolNameState = mutableStateOf("")
     private val statusMessageState = mutableStateOf<String?>(null)
     private val pendingImportState = mutableStateOf<PendingImport?>(null)
     private val todosState = mutableStateOf<List<TodoItemData>>(emptyList())
+    private val liveSessionCodeState = mutableStateOf<String?>(null)
+    private val liveSessionQrState = mutableStateOf<Bitmap?>(null)
+    private var livePollJob: Job? = null
+    private var lastAppliedRemoteUpdatedAt = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -114,6 +134,10 @@ class MainActivity : ComponentActivity() {
                         statusMessage = statusMessageState.value,
                         pendingImport = pendingImportState.value,
                         todos = todosState.value,
+                        liveSessionCode = liveSessionCodeState.value,
+                        liveSessionQr = liveSessionQrState.value,
+                        onStartLiveSession = { startLiveEditSession() },
+                        onStopLiveSession = { stopLiveEditSession() },
                         onSaveSchoolName = { name ->
                             schoolNameState.value = name
                             getSharedPreferences("school_widget_prefs", MODE_PRIVATE)
@@ -162,6 +186,64 @@ class MainActivity : ComponentActivity() {
         schoolNameState.value = prefs.getString("school_name", NeisMealService.DEFAULT_SCHOOL_NAME)
             ?: NeisMealService.DEFAULT_SCHOOL_NAME
         todosState.value = loadWidgetConfig(this).todos
+    }
+
+    /**
+     * "실시간 편집" 시작: 새 세션 코드를 만들어 현재 할 일을 클라우드에 올려두고
+     * QR을 보여준 뒤, 몇 초 간격으로 그 세션을 확인해 폰에서 바뀐 내용을 자동으로
+     * 이 기기(위젯)에 반영한다. 카메라로 QR을 찍기 불편한 기기가 원인이었던
+     * "전자칠판에서 타이핑하기 불편함" 문제를 폰에서 대신 입력하게 해서 해결한다.
+     */
+    private fun startLiveEditSession() {
+        stopLiveEditSession()
+
+        val code = FirestoreSessionClient.generateSessionCode()
+        lastAppliedRemoteUpdatedAt = 0L
+        liveSessionCodeState.value = code
+        liveSessionQrState.value = try {
+            generateQrBitmap("$MOBILE_EDIT_BASE_URL?session=$code")
+        } catch (e: Exception) {
+            null
+        }
+
+        livePollJob = lifecycleScope.launch {
+            // 폰에서 빈 목록으로 시작하지 않도록, 지금 위젯에 있는 할 일을 먼저 올려둔다.
+            FirestoreSessionClient.writeTodos(code, loadWidgetConfig(this@MainActivity).todos)
+
+            while (true) {
+                delay(LIVE_SESSION_POLL_INTERVAL_MS)
+                val activeCode = liveSessionCodeState.value ?: break
+                val (remoteTodos, updatedAt) = FirestoreSessionClient.readSession(activeCode) ?: continue
+                if (updatedAt > lastAppliedRemoteUpdatedAt) {
+                    lastAppliedRemoteUpdatedAt = updatedAt
+                    reorderTodos(this@MainActivity, remoteTodos)
+                    refreshFromStorage()
+                    scheduleImmediateSync()
+                }
+            }
+        }
+    }
+
+    private fun stopLiveEditSession() {
+        livePollJob?.cancel()
+        livePollJob = null
+        val code = liveSessionCodeState.value
+        liveSessionCodeState.value = null
+        liveSessionQrState.value = null
+        if (code != null) {
+            lifecycleScope.launch { FirestoreSessionClient.deleteSession(code) }
+        }
+    }
+
+    private fun generateQrBitmap(text: String, size: Int = 512): Bitmap {
+        val bitMatrix = QRCodeWriter().encode(text, BarcodeFormat.QR_CODE, size, size)
+        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.RGB_565)
+        for (x in 0 until size) {
+            for (y in 0 until size) {
+                bitmap.setPixel(x, y, if (bitMatrix.get(x, y)) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
+            }
+        }
+        return bitmap
     }
 
     /**
@@ -316,6 +398,10 @@ private fun SchoolWidgetSettingsScreen(
     statusMessage: String?,
     pendingImport: PendingImport?,
     todos: List<TodoItemData>,
+    liveSessionCode: String?,
+    liveSessionQr: Bitmap?,
+    onStartLiveSession: () -> Unit,
+    onStopLiveSession: () -> Unit,
     onSaveSchoolName: (String) -> Unit,
     onRefreshMeal: () -> Unit,
     onConfirmImport: () -> Unit,
@@ -478,6 +564,83 @@ private fun SchoolWidgetSettingsScreen(
                         }
                     }) {
                         Icon(Icons.Default.ContentPaste, contentDescription = "붙여넣은 링크 적용", tint = Color(0xFF34D399))
+                    }
+                }
+            }
+
+            // 실시간 편집: 폰으로 QR을 찍어서 할 일 목록만 편하게 수정하고, 몇 초 안에
+            // 자동으로 이 기기(위젯)에 반영되는 기능. 전자칠판 자체 키보드로 타이핑하기
+            // 불편하다는 피드백에서 나온 기능.
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Default.QrCode2,
+                            contentDescription = null,
+                            tint = Color(0xFFF472B6),
+                            modifier = Modifier.width(36.dp)
+                        )
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "실시간 편집 (폰으로 할 일 수정)",
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                fontSize = 15.sp
+                            )
+                            Text(
+                                text = "QR을 폰 카메라로 찍으면 폰에서 할 일을 편하게 수정할 수 있고, 몇 초 안에 자동으로 여기 반영됩니다.",
+                                color = Color(0xFF94A3B8),
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    if (liveSessionCode == null) {
+                        Button(
+                            onClick = onStartLiveSession,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDB2777))
+                        ) {
+                            Icon(Icons.Default.QrCode2, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("실시간 편집 시작", fontWeight = FontWeight.Bold)
+                        }
+                    } else {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            if (liveSessionQr != null) {
+                                Image(
+                                    bitmap = liveSessionQr.asImageBitmap(),
+                                    contentDescription = "실시간 편집 QR코드",
+                                    modifier = Modifier
+                                        .size(200.dp)
+                                        .background(Color.White)
+                                        .padding(8.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "세션 코드: $liveSessionCode",
+                                color = Color(0xFF94A3B8),
+                                fontSize = 13.sp
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Button(
+                                onClick = onStopLiveSession,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF334155))
+                            ) {
+                                Text("편집 종료", fontWeight = FontWeight.Bold)
+                            }
+                        }
                     }
                 }
             }

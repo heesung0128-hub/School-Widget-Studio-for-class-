@@ -72,8 +72,12 @@ dependencies {
     // WorkManager (Background periodic sync for NEIS meals & timetable)
     implementation("androidx.work:work-runtime-ktx:2.10.0")
 
-    // OkHttp + org.json (NEIS Open API client)
+    // OkHttp + org.json (NEIS Open API client, Firestore REST client)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+
+    // QR 코드 생성 (실시간 편집 세션 - 카메라 스캔이 아니라 오직 그리기용이라
+    // core 모듈만 사용, 안드로이드용 스캐너 UI가 포함된 zxing-android-embedded는 불필요)
+    implementation("com.google.zxing:core:3.5.3")
 }

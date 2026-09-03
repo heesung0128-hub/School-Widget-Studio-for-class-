@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+<title>할 일 편집</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", sans-serif;
+    background: #020617;
+    color: #e2e8f0;
+    min-height: 100vh;
+    padding: 16px;
+  }
+  h1 {
+    font-size: 18px;
+    margin: 0 0 4px;
+  }
+  .sub {
+    color: #94a3b8;
+    font-size: 13px;
+    margin: 0 0 16px;
+  }
+  .card {
+    background: #0f172a;
+    border: 1px solid #1e293b;
+    border-radius: 14px;
+    padding: 12px;
+    margin-bottom: 10px;
+  }
+  .add-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .add-row input {
+    flex: 1;
+    padding: 12px;
+    border-radius: 10px;
+    border: 1px solid #334155;
+    background: #0b1220;
+    color: #f1f5f9;
+    font-size: 15px;
+  }
+  .add-row button {
+    padding: 0 16px;
+    border-radius: 10px;
+    border: none;
+    background: #38bdf8;
+    color: #04121f;
+    font-weight: 700;
+    font-size: 14px;
+  }
+  .todo-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 2px;
+  }
+  .todo-row input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    accent-color: #4ade80;
+    flex-shrink: 0;
+  }
+  .todo-text {
+    flex: 1;
+    font-size: 15px;
+    word-break: break-word;
+  }
+  .todo-text.done {
+    color: #64748b;
+    text-decoration: line-through;
+  }
+  .del-btn {
+    border: none;
+    background: transparent;
+    color: #94a3b8;
+    font-size: 18px;
+    padding: 4px 8px;
+    flex-shrink: 0;
+  }
+  .empty {
+    color: #64748b;
+    font-size: 13px;
+    text-align: center;
+    padding: 16px 0;
+  }
+  .status {
+    font-size: 12px;
+    color: #64748b;
+    text-align: center;
+    margin-top: 12px;
+    min-height: 16px;
+  }
+  .status.error { color: #fca5a5; }
+  .status.ok { color: #4ade80; }
+</style>
+</head>
+<body>
+  <h1>✅ 할 일 편집</h1>
+  <p class="sub" id="subtitle">불러오는 중...</p>
+
+  <div class="add-row">
+    <input id="newTodoInput" type="text" placeholder="새로운 할 일 입력" maxlength="80" />
+    <button id="addBtn">추가</button>
+  </div>
+
+  <div id="list" class="card"></div>
+
+  <p class="status" id="status"></p>
+
+  <script>
+    const PROJECT_ID = "school-widget-for-class";
+    const MAX_TODOS = 200;
+    const MAX_TEXT_LENGTH = 80;
+
+    const params = new URLSearchParams(window.location.search);
+    const sessionCode = (params.get("session") || "").trim();
+
+    const subtitleEl = document.getElementById("subtitle");
+    const listEl = document.getElementById("list");
+    const statusEl = document.getElementById("status");
+    const newTodoInput = document.getElementById("newTodoInput");
+    const addBtn = document.getElementById("addBtn");
+
+    let todos = [];
+    let saving = false;
+
+    function docUrl() {
+      return `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/widgetSessions/${encodeURIComponent(sessionCode)}`;
+    }
+
+    function setStatus(text, kind) {
+      statusEl.textContent = text;
+      statusEl.className = "status" + (kind ? " " + kind : "");
+    }
+
+    function fsString(v) { return { stringValue: String(v).slice(0, MAX_TEXT_LENGTH) }; }
+    function fsBool(v) { return { booleanValue: !!v }; }
+
+    function todosToFirestoreValue(list) {
+      return {
+        arrayValue: {
+          values: list.slice(0, MAX_TODOS).map((t) => ({
+            mapValue: {
+              fields: {
+                id: fsString(t.id),
+                text: fsString(t.text),
+                completed: fsBool(t.completed),
+              },
+            },
+          })),
+        },
+      };
+    }
+
+    function parseFirestoreDoc(json) {
+      const fields = json && json.fields;
+      if (!fields || !fields.todos || !fields.todos.arrayValue || !fields.todos.arrayValue.values) {
+        return [];
+      }
+      return fields.todos.arrayValue.values.map((v) => {
+        const f = (v.mapValue && v.mapValue.fields) || {};
+        return {
+          id: (f.id && f.id.stringValue) || String(Date.now() + Math.random()),
+          text: (f.text && f.text.stringValue) || "",
+          completed: !!(f.completed && f.completed.booleanValue),
+        };
+      }).slice(0, MAX_TODOS);
+    }
+
+    async function loadTodos() {
+      try {
+        const res = await fetch(docUrl());
+        if (res.status === 404) {
+          todos = [];
+        } else if (res.ok) {
+          const json = await res.json();
+          todos = parseFirestoreDoc(json);
+        } else {
+          throw new Error("HTTP " + res.status);
+        }
+        subtitleEl.textContent = `세션 ${sessionCode} · 위젯과 자동으로 동기화됩니다`;
+        render();
+      } catch (e) {
+        setStatus("불러오지 못했습니다. 인터넷 연결을 확인해주세요.", "error");
+      }
+    }
+
+    async function saveTodos() {
+      saving = true;
+      setStatus("저장 중...");
+      try {
+        const body = {
+          fields: {
+            todos: todosToFirestoreValue(todos),
+            updatedAt: { integerValue: String(Date.now()) },
+          },
+        };
+        const res = await fetch(docUrl(), {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        setStatus("저장됨 ✓", "ok");
+      } catch (e) {
+        setStatus("저장하지 못했습니다. 다시 시도해주세요.", "error");
+      } finally {
+        saving = false;
+      }
+    }
+
+    function render() {
+      listEl.innerHTML = "";
+      if (todos.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "할 일이 없습니다. 위에서 추가해보세요.";
+        listEl.appendChild(empty);
+        return;
+      }
+      todos.forEach((todo) => {
+        const row = document.createElement("div");
+        row.className = "todo-row";
+
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = todo.completed;
+        checkbox.addEventListener("change", () => {
+          todo.completed = checkbox.checked;
+          render();
+          saveTodos();
+        });
+
+        const text = document.createElement("span");
+        text.className = "todo-text" + (todo.completed ? " done" : "");
+        text.textContent = todo.text;
+
+        const delBtn = document.createElement("button");
+        delBtn.className = "del-btn";
+        delBtn.textContent = "✕";
+        delBtn.addEventListener("click", () => {
+          todos = todos.filter((t) => t.id !== todo.id);
+          render();
+          saveTodos();
+        });
+
+        row.appendChild(checkbox);
+        row.appendChild(text);
+        row.appendChild(delBtn);
+        listEl.appendChild(row);
+      });
+    }
+
+    function addTodo() {
+      const value = newTodoInput.value.trim();
+      if (!value) return;
+      todos.push({ id: String(Date.now()), text: value.slice(0, MAX_TEXT_LENGTH), completed: false });
+      newTodoInput.value = "";
+      render();
+      saveTodos();
+    }
+
+    addBtn.addEventListener("click", addTodo);
+    newTodoInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") addTodo();
+    });
+
+    if (!sessionCode) {
+      subtitleEl.textContent = "세션 코드가 없습니다.";
+      setStatus("전자칠판 앱에서 [실시간 편집 시작]으로 표시된 QR코드를 다시 스캔해주세요.", "error");
+    } else {
+      loadTodos();
+    }
+  </script>
+</body>
+</html>
