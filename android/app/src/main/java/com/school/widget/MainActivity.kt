@@ -1,6 +1,7 @@
 package com.school.widget
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.util.Base64
 import android.widget.Toast
@@ -23,6 +24,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Link
@@ -122,6 +124,7 @@ class MainActivity : ComponentActivity() {
                         onRefreshMeal = { scheduleImmediateSync() },
                         onConfirmImport = { applyPendingImport() },
                         onCancelImport = { pendingImportState.value = null },
+                        onApplyPastedConfig = { pasted -> handlePastedConfig(pasted) },
                         onAddTodo = { text ->
                             addTodo(this, text)
                             refreshFromStorage()
@@ -173,6 +176,49 @@ class MainActivity : ComponentActivity() {
         val data = intent?.data ?: return false
         if (data.scheme != "schoolwidget" || data.host != "import") return false
         val encoded = data.getQueryParameter("config") ?: return false
+        return stageImport(encoded)
+    }
+
+    /**
+     * 딥링크를 탭할 수 없는 환경(카메라 위치가 불편한 전자칠판 등)을 위해, 스튜디오의
+     * "링크만 복사"로 받은 전체 링크나 그 안의 config 값만 붙여넣어도 그대로 적용한다.
+     */
+    private fun handlePastedConfig(pasted: String) {
+        val encoded = extractEncodedConfig(pasted)
+        if (encoded == null) {
+            statusMessageState.value = "⚠️ 붙여넣은 내용에서 설정을 찾지 못했습니다."
+            return
+        }
+        stageImport(encoded)
+    }
+
+    private fun extractEncodedConfig(pasted: String): String? {
+        val trimmed = pasted.trim()
+        if (trimmed.isEmpty()) return null
+
+        val uri = try {
+            Uri.parse(trimmed)
+        } catch (e: Exception) {
+            null
+        }
+        if (uri != null && uri.scheme == "schoolwidget" && uri.host == "import") {
+            return uri.getQueryParameter("config")
+        }
+
+        val markerIndex = trimmed.indexOf("config=")
+        if (markerIndex != -1) {
+            return trimmed.substring(markerIndex + "config=".length).trim()
+        }
+
+        // 링크 형식이 아니면, 붙여넣은 문자열 자체가 인코딩된 설정 값이라고 본다.
+        return trimmed
+    }
+
+    /**
+     * 딥링크(handleImportIntent)와 붙여넣기(handlePastedConfig) 두 경로 모두
+     * 여기서 공통으로 파싱하고, 사용자가 확인해야만 적용되도록 대기 상태로 둔다.
+     */
+    private fun stageImport(encoded: String): Boolean {
         if (encoded.length > MAX_IMPORT_PAYLOAD_CHARS) {
             statusMessageState.value = "⚠️ 전달된 설정이 너무 커서 무시했습니다."
             return false
@@ -274,6 +320,7 @@ private fun SchoolWidgetSettingsScreen(
     onRefreshMeal: () -> Unit,
     onConfirmImport: () -> Unit,
     onCancelImport: () -> Unit,
+    onApplyPastedConfig: (String) -> Unit,
     onAddTodo: (String) -> Unit,
     onToggleTodo: (String) -> Unit,
     onDeleteTodo: (String) -> Unit,
@@ -282,6 +329,7 @@ private fun SchoolWidgetSettingsScreen(
     var schoolInput by remember(currentSchool) { mutableStateOf(currentSchool) }
     var snackbarVisible by remember { mutableStateOf(false) }
     var newTodoText by remember { mutableStateOf("") }
+    var pasteInput by remember { mutableStateOf("") }
 
     if (pendingImport != null) {
         AlertDialog(
@@ -388,6 +436,48 @@ private fun SchoolWidgetSettingsScreen(
                             color = Color(0xFF94A3B8),
                             fontSize = 12.sp
                         )
+                    }
+                }
+            }
+
+            // 카메라로 QR을 찍기 불편한 기기(전자칠판 등)를 위한 대안: 스튜디오의
+            // "링크만 복사"로 받은 링크(또는 그 안의 설정 값)를 여기에 그대로 붙여넣으면
+            // 딥링크를 탭한 것과 동일하게 적용된다.
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "또는, 링크 붙여넣기로 적용",
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    fontSize = 13.sp
+                )
+                Text(
+                    text = "스튜디오의 [링크만 복사]로 받은 링크를 아래에 붙여넣으세요. 카메라로 QR을 찍기 어려운 기기에서 유용합니다.",
+                    color = Color(0xFF94A3B8),
+                    fontSize = 12.sp
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = pasteInput,
+                        onValueChange = { pasteInput = it },
+                        label = { Text("schoolwidget://import?config=... 붙여넣기") },
+                        modifier = Modifier.weight(1f),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color(0xFF34D399),
+                            unfocusedBorderColor = Color(0xFF334155)
+                        )
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    IconButton(onClick = {
+                        if (pasteInput.isNotBlank()) {
+                            onApplyPastedConfig(pasteInput)
+                            pasteInput = ""
+                        }
+                    }) {
+                        Icon(Icons.Default.ContentPaste, contentDescription = "붙여넣은 링크 적용", tint = Color(0xFF34D399))
                     }
                 }
             }
