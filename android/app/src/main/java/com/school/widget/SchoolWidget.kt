@@ -16,7 +16,6 @@ import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.action.actionStartActivity
-import androidx.glance.appwidget.lazy.LazyColumn
 import androidx.glance.appwidget.provideContent
 import androidx.glance.background
 import androidx.glance.layout.Alignment
@@ -104,16 +103,15 @@ class SchoolWidget : GlanceAppWidget() {
         val todayStr = dateFormat.format(Date())
         val pendingCount = todos.count { !it.completed }
 
-        // 위젯이 홈 화면/전자칠판 런처에서 짧게 배치되면 Column은 스크롤이 안 돼서
-        // 아래쪽 섹션(할 일 목록 등)이 그냥 잘려서 안 보이는 문제가 있었다. LazyColumn으로
-        // 감싸면 위젯 안에서 손가락으로 스크롤해 나머지 내용을 볼 수 있다.
-        LazyColumn(
+        // 일부 위젯 런처(이 전자칠판 포함)는 위젯 안쪽 스크롤 제스처를 지원하지 않아서,
+        // 넘치는 내용이 스크롤 없이 그냥 잘려 보이지 않는 문제가 있었다. 그래서 스크롤에
+        // 기대지 않고 애초에 위젯 최대 크기 안에 다 들어가도록 여백/항목 수를 줄였다.
+        Column(
             modifier = GlanceModifier
                 .fillMaxSize()
                 .background(palette.containerBg)
+                .padding(12.dp)
         ) {
-            item {
-                Column(modifier = GlanceModifier.fillMaxWidth().padding(16.dp)) {
             // 1. 헤더: 날짜 + 학교명 (한 줄)
             // 시간은 표시하지 않는다 - 위젯은 15분 주기로만 갱신되어 실시간 시계가 아니므로,
             // 마지막 갱신 시각을 시계처럼 보여주면 오해를 준다는 피드백에 따라 제거함.
@@ -143,7 +141,7 @@ class SchoolWidget : GlanceAppWidget() {
                 )
             }
 
-            Spacer(modifier = GlanceModifier.height(8.dp))
+            Spacer(modifier = GlanceModifier.height(4.dp))
 
             // 2. D-Day 배지 (전체 표시, 2열 칩 형태 - 데스크톱 위젯처럼 간결하게)
             if (ddayLabels.isNotEmpty()) {
@@ -160,10 +158,10 @@ class SchoolWidget : GlanceAppWidget() {
                                 Spacer(modifier = GlanceModifier.defaultWeight())
                             }
                         }
-                        Spacer(modifier = GlanceModifier.height(4.dp))
+                        Spacer(modifier = GlanceModifier.height(2.dp))
                     }
                 }
-                Spacer(modifier = GlanceModifier.height(4.dp))
+                Spacer(modifier = GlanceModifier.height(2.dp))
             }
 
             // 3. 오늘 시간표 (오전/오후 2열, 전체 교시)
@@ -171,18 +169,18 @@ class SchoolWidget : GlanceAppWidget() {
                 modifier = GlanceModifier
                     .fillMaxWidth()
                     .background(palette.cardBg)
-                    .padding(10.dp)
+                    .padding(8.dp)
             ) {
                 Column {
                     Text(
                         text = "🕐 시간표 ($todayDay)",
                         style = TextStyle(
                             color = ColorProvider(palette.accent),
-                            fontSize = fs(14),
+                            fontSize = fs(13),
                             fontWeight = FontWeight.Bold
                         )
                     )
-                    Spacer(modifier = GlanceModifier.height(6.dp))
+                    Spacer(modifier = GlanceModifier.height(4.dp))
                     if (todayPeriods.isEmpty()) {
                         Text(
                             text = "오늘 등록된 시간표가 없습니다.",
@@ -206,20 +204,20 @@ class SchoolWidget : GlanceAppWidget() {
                 }
             }
 
-            Spacer(modifier = GlanceModifier.height(8.dp))
+            Spacer(modifier = GlanceModifier.height(4.dp))
 
             // 4. 나이스 실시간 급식 (전체 메뉴, 2열)
             Column(
                 modifier = GlanceModifier
                     .fillMaxWidth()
                     .background(palette.cardBg)
-                    .padding(12.dp)
+                    .padding(8.dp)
             ) {
                 Row(modifier = GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = "🍱 $mealTitle",
                         maxLines = 1,
-                        style = TextStyle(color = ColorProvider(palette.accent), fontSize = fs(14), fontWeight = FontWeight.Bold)
+                        style = TextStyle(color = ColorProvider(palette.accent), fontSize = fs(13), fontWeight = FontWeight.Bold)
                     )
                     if (mealDateLabel.isNotBlank()) {
                         Spacer(modifier = GlanceModifier.width(6.dp))
@@ -244,7 +242,7 @@ class SchoolWidget : GlanceAppWidget() {
                         )
                     }
                 }
-                Spacer(modifier = GlanceModifier.height(6.dp))
+                Spacer(modifier = GlanceModifier.height(4.dp))
                 val dishes = todayMeal.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
                 if (dishes.isEmpty()) {
                     Text(
@@ -273,20 +271,24 @@ class SchoolWidget : GlanceAppWidget() {
                 }
             }
 
-            Spacer(modifier = GlanceModifier.height(8.dp))
+            Spacer(modifier = GlanceModifier.height(4.dp))
 
             // 5. 할 일 목록 (체크로 완료 표시, 추가/삭제/순서변경은 앱에서)
+            // 이 위젯 안에서 스크롤이 안 되는 런처도 있어서, 전부 다 보여주는 대신
+            // 일부만 보여주고 "+ 할 일 추가/관리"로 앱에서 전체 목록을 다루게 한다.
+            // 새로고침 버튼은 15분 자동 동기화 + 앱의 즉시 동기화 버튼과 중복이라 제거해
+            // 그만큼 공간을 아꼈다.
             Column(
                 modifier = GlanceModifier
                     .fillMaxWidth()
                     .background(palette.cardBg)
-                    .padding(12.dp)
+                    .padding(8.dp)
             ) {
                 Row(modifier = GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = "✅ 할 일 목록",
                         maxLines = 1,
-                        style = TextStyle(color = ColorProvider(palette.accent), fontSize = fs(14), fontWeight = FontWeight.Bold)
+                        style = TextStyle(color = ColorProvider(palette.accent), fontSize = fs(13), fontWeight = FontWeight.Bold)
                     )
                     Spacer(modifier = GlanceModifier.defaultWeight())
                     Text(
@@ -295,18 +297,17 @@ class SchoolWidget : GlanceAppWidget() {
                         style = TextStyle(color = ColorProvider(palette.textSecondary), fontSize = fs(12))
                     )
                 }
-                Spacer(modifier = GlanceModifier.height(6.dp))
+                Spacer(modifier = GlanceModifier.height(4.dp))
                 if (todos.isEmpty()) {
                     Text(
                         text = "할 일이 없습니다.",
                         style = TextStyle(color = ColorProvider(palette.textSecondary), fontSize = fs(12))
                     )
                 } else {
-                    todos.take(8).forEach { todo ->
+                    todos.take(4).forEach { todo ->
                         Row(
                             modifier = GlanceModifier
                                 .fillMaxWidth()
-                                .padding(vertical = 2.dp)
                                 .clickable(actionRunCallback<ToggleTodoAction>(actionParametersOf(TodoIdKey to todo.id))),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -329,8 +330,14 @@ class SchoolWidget : GlanceAppWidget() {
                             )
                         }
                     }
+                    if (todos.size > 4) {
+                        Text(
+                            text = "+${todos.size - 4}개 더 (앱에서 확인)",
+                            maxLines = 1,
+                            style = TextStyle(color = ColorProvider(palette.textSecondary), fontSize = fs(11))
+                        )
+                    }
                 }
-                Spacer(modifier = GlanceModifier.height(4.dp))
                 Text(
                     text = "+ 할 일 추가/관리",
                     maxLines = 1,
@@ -339,20 +346,6 @@ class SchoolWidget : GlanceAppWidget() {
                     ),
                     style = TextStyle(color = ColorProvider(palette.accent), fontSize = fs(12), fontWeight = FontWeight.Bold)
                 )
-            }
-
-            Spacer(modifier = GlanceModifier.height(8.dp))
-
-            // 6. 하단 새로고침 버튼
-            Row(modifier = GlanceModifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
-                Text(
-                    text = "🔄 새로고침",
-                    maxLines = 1,
-                    modifier = GlanceModifier.clickable(actionRunCallback<RefreshWidgetAction>()),
-                    style = TextStyle(color = ColorProvider(palette.accent), fontSize = fs(13), fontWeight = FontWeight.Bold)
-                )
-            }
-                }
             }
         }
     }
@@ -422,17 +415,6 @@ class SchoolWidget : GlanceAppWidget() {
             Calendar.SATURDAY -> "토"
             else -> "일"
         }
-    }
-}
-
-class RefreshWidgetAction : ActionCallback {
-    override suspend fun onAction(
-        context: Context,
-        glanceId: GlanceId,
-        parameters: ActionParameters
-    ) {
-        NeisMealService.syncMealData(context)
-        SchoolWidget().update(context, glanceId)
     }
 }
 
