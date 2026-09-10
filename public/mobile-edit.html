@@ -82,6 +82,22 @@
     padding: 4px 8px;
     flex-shrink: 0;
   }
+  .order-btns {
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+  }
+  .order-btns button {
+    border: none;
+    background: transparent;
+    color: #94a3b8;
+    font-size: 14px;
+    line-height: 1;
+    padding: 3px 6px;
+  }
+  .order-btns button:disabled {
+    color: #334155;
+  }
   .empty {
     color: #64748b;
     font-size: 13px;
@@ -223,9 +239,25 @@
         listEl.appendChild(empty);
         return;
       }
-      todos.forEach((todo) => {
+      todos.forEach((todo, index) => {
         const row = document.createElement("div");
         row.className = "todo-row";
+
+        const orderBtns = document.createElement("div");
+        orderBtns.className = "order-btns";
+
+        const upBtn = document.createElement("button");
+        upBtn.textContent = "▲";
+        upBtn.disabled = index === 0;
+        upBtn.addEventListener("click", () => moveTodo(index, index - 1));
+
+        const downBtn = document.createElement("button");
+        downBtn.textContent = "▼";
+        downBtn.disabled = index === todos.length - 1;
+        downBtn.addEventListener("click", () => moveTodo(index, index + 1));
+
+        orderBtns.appendChild(upBtn);
+        orderBtns.appendChild(downBtn);
 
         const checkbox = document.createElement("input");
         checkbox.type = "checkbox";
@@ -249,11 +281,20 @@
           saveTodos();
         });
 
+        row.appendChild(orderBtns);
         row.appendChild(checkbox);
         row.appendChild(text);
         row.appendChild(delBtn);
         listEl.appendChild(row);
       });
+    }
+
+    function moveTodo(fromIndex, toIndex) {
+      if (toIndex < 0 || toIndex >= todos.length) return;
+      const [moved] = todos.splice(fromIndex, 1);
+      todos.splice(toIndex, 0, moved);
+      render();
+      saveTodos();
     }
 
     function addTodo() {

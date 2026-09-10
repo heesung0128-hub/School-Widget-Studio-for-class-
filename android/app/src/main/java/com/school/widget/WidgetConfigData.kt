@@ -111,6 +111,12 @@ private const val MAX_TITLE_LENGTH = 80
 
 private const val INTERNAL_CONFIG_FILENAME = "widget_config.json"
 
+// 위젯에서 할 일 두 개를 거의 동시에 누르면(예: 완료 체크 두 번 연달아) 각각의
+// 읽기-수정-쓰기가 겹쳐서 먼저 처리된 변경이 나중 것에 덮어써지는 문제가 있었다
+// ("하나 누르면 다른 게 안 눌리는" 것처럼 보이거나, 체크가 다시 취소되지 않는 원인).
+// 파일 읽기/쓰기 전체를 이 락으로 감싸 항상 순서대로만 처리되게 한다.
+private val configFileLock = Any()
+
 fun parseWidgetConfigJson(text: String): WidgetConfigData {
     val root = JSONObject(text)
 
@@ -235,40 +241,50 @@ fun loadWidgetConfig(context: Context): WidgetConfigData {
 fun saveWidgetConfig(context: Context, jsonText: String) {
     // 저장 전에도 한 번 파싱→직렬화를 거쳐서 길이 제한이 항상 적용되도록 한다
     val sanitized = parseWidgetConfigJson(jsonText).toJson().toString()
-    java.io.File(context.filesDir, INTERNAL_CONFIG_FILENAME).writeText(sanitized)
+    synchronized(configFileLock) {
+        java.io.File(context.filesDir, INTERNAL_CONFIG_FILENAME).writeText(sanitized)
+    }
 }
 
 fun toggleTodoCompleted(context: Context, todoId: String) {
-    val current = loadWidgetConfig(context)
-    val updated = current.copy(
-        todos = current.todos.map { if (it.id == todoId) it.copy(completed = !it.completed) else it }
-    )
-    java.io.File(context.filesDir, INTERNAL_CONFIG_FILENAME).writeText(updated.toJson().toString())
+    synchronized(configFileLock) {
+        val current = loadWidgetConfig(context)
+        val updated = current.copy(
+            todos = current.todos.map { if (it.id == todoId) it.copy(completed = !it.completed) else it }
+        )
+        java.io.File(context.filesDir, INTERNAL_CONFIG_FILENAME).writeText(updated.toJson().toString())
+    }
 }
 
 fun addTodo(context: Context, text: String) {
     if (text.isBlank()) return
-    val current = loadWidgetConfig(context)
-    val newItem = TodoItemData(
-        id = System.currentTimeMillis().toString(),
-        text = text.trim().take(MAX_TITLE_LENGTH),
-        completed = false
-    )
-    val updated = current.copy(todos = (current.todos + newItem).takeLast(MAX_TODOS))
-    java.io.File(context.filesDir, INTERNAL_CONFIG_FILENAME).writeText(updated.toJson().toString())
+    synchronized(configFileLock) {
+        val current = loadWidgetConfig(context)
+        val newItem = TodoItemData(
+            id = System.currentTimeMillis().toString(),
+            text = text.trim().take(MAX_TITLE_LENGTH),
+            completed = false
+        )
+        val updated = current.copy(todos = (current.todos + newItem).takeLast(MAX_TODOS))
+        java.io.File(context.filesDir, INTERNAL_CONFIG_FILENAME).writeText(updated.toJson().toString())
+    }
 }
 
 fun deleteTodo(context: Context, todoId: String) {
-    val current = loadWidgetConfig(context)
-    val updated = current.copy(todos = current.todos.filterNot { it.id == todoId })
-    java.io.File(context.filesDir, INTERNAL_CONFIG_FILENAME).writeText(updated.toJson().toString())
+    synchronized(configFileLock) {
+        val current = loadWidgetConfig(context)
+        val updated = current.copy(todos = current.todos.filterNot { it.id == todoId })
+        java.io.File(context.filesDir, INTERNAL_CONFIG_FILENAME).writeText(updated.toJson().toString())
+    }
 }
 
-/** 앱의 할 일 관리 화면에서 드래그로 바꾼 순서를 그대로 저장한다. */
+/** 앱의 할 일 관리 화면에서 드래그로 바꾼 순서(또는 실시간 편집에서 받은 목록)를 그대로 저장한다. */
 fun reorderTodos(context: Context, newOrder: List<TodoItemData>) {
-    val current = loadWidgetConfig(context)
-    val updated = current.copy(todos = newOrder)
-    java.io.File(context.filesDir, INTERNAL_CONFIG_FILENAME).writeText(updated.toJson().toString())
+    synchronized(configFileLock) {
+        val current = loadWidgetConfig(context)
+        val updated = current.copy(todos = newOrder)
+        java.io.File(context.filesDir, INTERNAL_CONFIG_FILENAME).writeText(updated.toJson().toString())
+    }
 }
 
 /**

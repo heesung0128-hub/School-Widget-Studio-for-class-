@@ -3,6 +3,7 @@ package com.school.widget
 import android.content.Context
 import android.content.Intent
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -305,29 +306,35 @@ class SchoolWidget : GlanceAppWidget() {
                     )
                 } else {
                     todos.take(10).forEach { todo ->
-                        Row(
-                            modifier = GlanceModifier
-                                .fillMaxWidth()
-                                .clickable(actionRunCallback<ToggleTodoAction>(actionParametersOf(TodoIdKey to todo.id))),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = if (todo.completed) "☑ " else "☐ ",
-                                style = TextStyle(
-                                    color = ColorProvider(if (todo.completed) Color(0xFF4ADE80) else palette.textSecondary),
-                                    fontSize = fs(13)
+                        // key()로 각 행을 id 기준으로 구분해야 한다 - 없으면 완료 표시로
+                        // 텍스트/스타일이 바뀔 때 Glance가 같은 위치의 다른 행과 혼동해서
+                        // 클릭 액션이 엉뚱한 항목에 걸리거나(다른 항목이 안 눌림),
+                        // 방금 누른 항목이 다시 눌리지 않는 문제가 있었다.
+                        key(todo.id) {
+                            Row(
+                                modifier = GlanceModifier
+                                    .fillMaxWidth()
+                                    .clickable(actionRunCallback<ToggleTodoAction>(actionParametersOf(TodoIdKey to todo.id))),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = if (todo.completed) "☑ " else "☐ ",
+                                    style = TextStyle(
+                                        color = ColorProvider(if (todo.completed) Color(0xFF4ADE80) else palette.textSecondary),
+                                        fontSize = fs(13)
+                                    )
                                 )
-                            )
-                            Text(
-                                text = todo.text,
-                                maxLines = 1,
-                                modifier = GlanceModifier.defaultWeight(),
-                                style = TextStyle(
-                                    color = ColorProvider(if (todo.completed) palette.textSecondary else palette.textPrimary),
-                                    fontSize = fs(13),
-                                    textDecoration = if (todo.completed) TextDecoration.LineThrough else TextDecoration.None
+                                Text(
+                                    text = todo.text,
+                                    maxLines = 1,
+                                    modifier = GlanceModifier.defaultWeight(),
+                                    style = TextStyle(
+                                        color = ColorProvider(if (todo.completed) palette.textSecondary else palette.textPrimary),
+                                        fontSize = fs(13),
+                                        textDecoration = if (todo.completed) TextDecoration.LineThrough else TextDecoration.None
+                                    )
                                 )
-                            )
+                            }
                         }
                     }
                     if (todos.size > 10) {
