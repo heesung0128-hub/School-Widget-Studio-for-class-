@@ -58,6 +58,23 @@
     align-items: center;
     gap: 10px;
     padding: 6px 2px;
+    background: #0f172a;
+  }
+  .todo-row.sortable-ghost {
+    opacity: 0.35;
+  }
+  .todo-row.sortable-drag {
+    background: #1e293b;
+    border-radius: 10px;
+  }
+  .grip {
+    flex-shrink: 0;
+    color: #64748b;
+    font-size: 18px;
+    line-height: 1;
+    padding: 4px 6px;
+    cursor: grab;
+    touch-action: none;
   }
   .todo-row input[type="checkbox"] {
     width: 20px;
@@ -81,22 +98,6 @@
     font-size: 18px;
     padding: 4px 8px;
     flex-shrink: 0;
-  }
-  .order-btns {
-    display: flex;
-    flex-direction: column;
-    flex-shrink: 0;
-  }
-  .order-btns button {
-    border: none;
-    background: transparent;
-    color: #94a3b8;
-    font-size: 14px;
-    line-height: 1;
-    padding: 3px 6px;
-  }
-  .order-btns button:disabled {
-    color: #334155;
   }
   .empty {
     color: #64748b;
@@ -128,6 +129,7 @@
 
   <p class="status" id="status"></p>
 
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.2/Sortable.min.js"></script>
   <script>
     const PROJECT_ID = "school-widget-for-class";
     const MAX_TODOS = 200;
@@ -239,25 +241,14 @@
         listEl.appendChild(empty);
         return;
       }
-      todos.forEach((todo, index) => {
+      todos.forEach((todo) => {
         const row = document.createElement("div");
         row.className = "todo-row";
+        row.dataset.id = todo.id;
 
-        const orderBtns = document.createElement("div");
-        orderBtns.className = "order-btns";
-
-        const upBtn = document.createElement("button");
-        upBtn.textContent = "▲";
-        upBtn.disabled = index === 0;
-        upBtn.addEventListener("click", () => moveTodo(index, index - 1));
-
-        const downBtn = document.createElement("button");
-        downBtn.textContent = "▼";
-        downBtn.disabled = index === todos.length - 1;
-        downBtn.addEventListener("click", () => moveTodo(index, index + 1));
-
-        orderBtns.appendChild(upBtn);
-        orderBtns.appendChild(downBtn);
+        const grip = document.createElement("span");
+        grip.className = "grip";
+        grip.textContent = "☰";
 
         const checkbox = document.createElement("input");
         checkbox.type = "checkbox";
@@ -281,7 +272,7 @@
           saveTodos();
         });
 
-        row.appendChild(orderBtns);
+        row.appendChild(grip);
         row.appendChild(checkbox);
         row.appendChild(text);
         row.appendChild(delBtn);
@@ -289,13 +280,21 @@
       });
     }
 
-    function moveTodo(fromIndex, toIndex) {
-      if (toIndex < 0 || toIndex >= todos.length) return;
-      const [moved] = todos.splice(fromIndex, 1);
-      todos.splice(toIndex, 0, moved);
-      render();
-      saveTodos();
-    }
+    // 데스크톱 위젯의 드래그-순서변경(그립 아이콘을 잡고 밀어서 순서 변경)과
+    // 동일한 조작감을 폰 터치에서도 안정적으로 지원하려면 순수 HTML5 드래그
+    // (draggable 속성)로는 부족해 SortableJS(터치 포인터 지원)를 사용한다.
+    // handle: ".grip"으로 그립 아이콘에서만 드래그가 시작되게 해 체크/삭제
+    // 버튼 조작과 충돌하지 않는다.
+    new Sortable(listEl, {
+      handle: ".grip",
+      animation: 150,
+      onEnd: (evt) => {
+        if (evt.oldIndex === evt.newIndex) return;
+        const [moved] = todos.splice(evt.oldIndex, 1);
+        todos.splice(evt.newIndex, 0, moved);
+        saveTodos();
+      },
+    });
 
     function addTodo() {
       const value = newTodoInput.value.trim();
