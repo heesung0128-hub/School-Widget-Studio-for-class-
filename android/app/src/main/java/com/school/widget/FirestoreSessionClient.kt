@@ -13,6 +13,7 @@ import org.json.JSONObject
  * 폰에서 읽어온 세션 문서. 각 목록은 문서에 그 필드가 아예 없으면 null이다
  * (예: 이전 버전 폰 페이지가 만든 세션에는 ddays/timetable이 없음) - null인 항목은
  * 위젯의 기존 값을 건드리지 않고 그대로 두기 위해 "비어 있음"과 구분한다.
+ * 목록은 모두 normalize*()를 거친 값이라, 위젯의 값도 같은 함수를 거치면 == 로 비교할 수 있다.
  */
 data class LiveSessionSnapshot(
     val todos: List<TodoItemData>?,
@@ -49,68 +50,105 @@ object FirestoreSessionClient {
     private fun docUrl(sessionCode: String): String =
         "https://firestore.googleapis.com/v1/projects/$PROJECT_ID/databases/(default)/documents/widgetSessions/$sessionCode"
 
+    // ---------- 정규화 ----------
+    // 클라우드에서 읽을 때 적용하는 개수/길이 제한과 형식 검사를, 위젯 쪽 값에도 똑같이 적용해서
+    // "양쪽이 같은 상태인가"를 == 로 정확히 비교할 수 있게 한다(예: 날짜 형식이 아닌 D-Day는
+    // 클라우드에서 걸러지므로, 위젯 쪽에서도 비교 전에 같이 걸러야 영원히 "다르다"로 보이지 않는다).
+
+    fun normalizeTodos(todos: List<TodoItemData>): List<TodoItemData> =
+        todos.take(MAX_TODOS).map {
+            TodoItemData(it.id.take(MAX_TEXT_LENGTH), it.text.take(MAX_TEXT_LENGTH), it.completed)
+        }
+
+    fun normalizeDDays(ddays: List<DDayItem>): List<DDayItem> =
+        ddays.mapNotNull {
+            val title = it.title.trim().take(MAX_TEXT_LENGTH)
+            val date = it.targetDate.trim()
+            // 날짜 형식이 아닌 값은 위젯이 어차피 표시하지 못하므로 걸러낸다
+            if (title.isEmpty() || !DATE_REGEX.matches(date)) null else DDayItem(title, date)
+        }.take(MAX_DDAYS)
+
+    fun normalizeTimetable(timetable: List<TimetableDay>): List<TimetableDay> =
+        timetable.take(MAX_TIMETABLE_DAYS).map { day ->
+            TimetableDay(day.day.take(4), day.periods.take(MAX_PERIODS_PER_DAY).map { it.take(MAX_TEXT_LENGTH) })
+        }
+
+    // ---------- Firestore 값 변환 ----------
+
     private fun stringField(value: String) = JSONObject().put("stringValue", value.take(MAX_TEXT_LENGTH))
 
     private fun mapField(fields: JSONObject) = JSONObject().put("mapValue", JSONObject().put("fields", fields))
 
     private fun arrayField(values: JSONArray) = JSONObject().put("arrayValue", JSONObject().put("values", values))
 
-    /** 세션 문서를 새로 만들거나 완전히 덮어쓴다 (할 일 + D-Day + 시간표 + updatedAt). */
-    suspend fun writeSession(
+    private fun todosToJson(todos: List<TodoItemData>): JSONObject {
+        val array = JSONArray()
+        normalizeTodos(todos).forEach { todo ->
+            array.put(
+                mapField(
+                    JSONObject()
+                        .put("id", stringField(todo.id))
+                        .put("text", stringField(todo.text))
+                        .put("completed", JSONObject().put("booleanValue", todo.completed))
+                )
+            )
+        }
+        return arrayField(array)
+    }
+
+    private fun ddaysToJson(ddays: List<DDayItem>): JSONObject {
+        val array = JSONArray()
+        normalizeDDays(ddays).forEach { dday ->
+            array.put(
+                mapField(
+                    JSONObject()
+                        .put("title", stringField(dday.title))
+                        .put("targetDate", stringField(dday.targetDate))
+                )
+            )
+        }
+        return arrayField(array)
+    }
+
+    private fun timetableToJson(timetable: List<TimetableDay>): JSONObject {
+        val array = JSONArray()
+        normalizeTimetable(timetable).forEach { day ->
+            val periods = JSONArray()
+            day.periods.forEach { periods.put(stringField(it)) }
+            array.put(
+                mapField(
+                    JSONObject()
+                        .put("day", stringField(day.day))
+                        .put("periods", arrayField(periods))
+                )
+            )
+        }
+        return arrayField(array)
+    }
+
+    /**
+     * 세션 문서에 넘겨준(null이 아닌) 항목만 쓴다. updateMask로 그 필드들만 바꾸므로
+     * 폰이 방금 저장한 다른 항목을 덮어쓰지 않는다. 문서가 없으면 새로 만든다.
+     */
+    suspend fun patchSession(
         sessionCode: String,
-        todos: List<TodoItemData>,
-        ddays: List<DDayItem>,
-        timetable: List<TimetableDay>
+        todos: List<TodoItemData>? = null,
+        ddays: List<DDayItem>? = null,
+        timetable: List<TimetableDay>? = null
     ): Boolean = withContext(Dispatchers.IO) {
         try {
-            val todosArray = JSONArray()
-            todos.take(MAX_TODOS).forEach { todo ->
-                todosArray.put(
-                    mapField(
-                        JSONObject()
-                            .put("id", stringField(todo.id))
-                            .put("text", stringField(todo.text))
-                            .put("completed", JSONObject().put("booleanValue", todo.completed))
-                    )
-                )
-            }
+            val fields = JSONObject()
+            val maskNames = mutableListOf<String>()
+            if (todos != null) { fields.put("todos", todosToJson(todos)); maskNames.add("todos") }
+            if (ddays != null) { fields.put("ddays", ddaysToJson(ddays)); maskNames.add("ddays") }
+            if (timetable != null) { fields.put("timetable", timetableToJson(timetable)); maskNames.add("timetable") }
+            fields.put("updatedAt", JSONObject().put("integerValue", System.currentTimeMillis().toString()))
+            maskNames.add("updatedAt")
 
-            val ddaysArray = JSONArray()
-            ddays.take(MAX_DDAYS).forEach { dday ->
-                ddaysArray.put(
-                    mapField(
-                        JSONObject()
-                            .put("title", stringField(dday.title))
-                            .put("targetDate", stringField(dday.targetDate))
-                    )
-                )
-            }
-
-            val timetableArray = JSONArray()
-            timetable.take(MAX_TIMETABLE_DAYS).forEach { day ->
-                val periodsArray = JSONArray()
-                day.periods.take(MAX_PERIODS_PER_DAY).forEach { periodsArray.put(stringField(it)) }
-                timetableArray.put(
-                    mapField(
-                        JSONObject()
-                            .put("day", stringField(day.day))
-                            .put("periods", arrayField(periodsArray))
-                    )
-                )
-            }
-
-            val body = JSONObject().put(
-                "fields",
-                JSONObject()
-                    .put("todos", arrayField(todosArray))
-                    .put("ddays", arrayField(ddaysArray))
-                    .put("timetable", arrayField(timetableArray))
-                    .put("updatedAt", JSONObject().put("integerValue", System.currentTimeMillis().toString()))
-            )
-
+            val mask = maskNames.joinToString("&") { "updateMask.fieldPaths=$it" }
             val request = Request.Builder()
-                .url(docUrl(sessionCode))
-                .patch(body.toString().toRequestBody(jsonMediaType))
+                .url("${docUrl(sessionCode)}?$mask")
+                .patch(JSONObject().put("fields", fields).toString().toRequestBody(jsonMediaType))
                 .build()
 
             client.newCall(request).execute().use { it.isSuccessful }
@@ -167,12 +205,12 @@ object FirestoreSessionClient {
             todos.add(
                 TodoItemData(
                     id = f.stringOf("id").ifEmpty { i.toString() },
-                    text = f.stringOf("text").take(MAX_TEXT_LENGTH),
+                    text = f.stringOf("text"),
                     completed = f.optJSONObject("completed")?.optBoolean("booleanValue") ?: false
                 )
             )
         }
-        return todos
+        return normalizeTodos(todos)
     }
 
     private fun parseDDays(fields: JSONObject): List<DDayItem>? {
@@ -180,13 +218,9 @@ object FirestoreSessionClient {
         val ddays = mutableListOf<DDayItem>()
         for (i in 0 until minOf(values.length(), MAX_DDAYS)) {
             val f = mapFields(values, i) ?: continue
-            val title = f.stringOf("title").trim().take(MAX_TEXT_LENGTH)
-            val date = f.stringOf("targetDate").trim()
-            // 날짜 형식이 아닌 값은 위젯이 어차피 표시하지 못하므로 저장 단계에서 걸러낸다
-            if (title.isEmpty() || !DATE_REGEX.matches(date)) continue
-            ddays.add(DDayItem(title, date))
+            ddays.add(DDayItem(f.stringOf("title"), f.stringOf("targetDate")))
         }
-        return ddays
+        return normalizeDDays(ddays)
     }
 
     private fun parseTimetable(fields: JSONObject): List<TimetableDay>? {
@@ -198,14 +232,12 @@ object FirestoreSessionClient {
             val periodValues = f.optJSONObject("periods")?.optJSONObject("arrayValue")?.optJSONArray("values")
             if (periodValues != null) {
                 for (j in 0 until minOf(periodValues.length(), MAX_PERIODS_PER_DAY)) {
-                    periods.add(
-                        (periodValues.optJSONObject(j)?.optString("stringValue") ?: "").take(MAX_TEXT_LENGTH)
-                    )
+                    periods.add(periodValues.optJSONObject(j)?.optString("stringValue") ?: "")
                 }
             }
-            days.add(TimetableDay(f.stringOf("day").take(4), periods))
+            days.add(TimetableDay(f.stringOf("day"), periods))
         }
-        return days
+        return normalizeTimetable(days)
     }
 
     /** 세션이 더 이상 필요 없을 때(편집 종료) 문서를 지운다. 실패해도 무해하므로 결과를 무시해도 된다. */

@@ -111,7 +111,6 @@ class MainActivity : ComponentActivity() {
     private val liveSessionCodeState = mutableStateOf<String?>(null)
     private val liveSessionQrState = mutableStateOf<Bitmap?>(null)
     private var livePollJob: Job? = null
-    private var lastAppliedRemoteUpdatedAt = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -198,7 +197,6 @@ class MainActivity : ComponentActivity() {
         stopLiveEditSession()
 
         val code = FirestoreSessionClient.generateSessionCode()
-        lastAppliedRemoteUpdatedAt = 0L
         liveSessionCodeState.value = code
         liveSessionQrState.value = try {
             generateQrBitmap("$MOBILE_EDIT_BASE_URL?session=$code")
@@ -206,22 +204,81 @@ class MainActivity : ComponentActivity() {
             null
         }
 
-        livePollJob = lifecycleScope.launch {
-            // 폰에서 빈 화면으로 시작하지 않도록, 지금 위젯에 있는 할 일/D-Day/시간표를 먼저 올려둔다.
-            val initial = loadWidgetConfig(this@MainActivity)
-            FirestoreSessionClient.writeSession(code, initial.todos, initial.ddays, initial.timetable)
+        livePollJob = lifecycleScope.launch { runLiveSyncLoop(code) }
+    }
 
-            while (true) {
-                delay(LIVE_SESSION_POLL_INTERVAL_MS)
-                val activeCode = liveSessionCodeState.value ?: break
-                val remote = FirestoreSessionClient.readSession(activeCode) ?: continue
-                // 크기 비교(>) 대신 "달라졌는가"로 판단한다 - 폰과 전자칠판의 시계가 어긋나 있으면
-                // 폰이 저장한 updatedAt이 더 작은 값이 되어 변경을 영영 못 받을 수 있기 때문.
-                if (remote.updatedAt != lastAppliedRemoteUpdatedAt) {
-                    lastAppliedRemoteUpdatedAt = remote.updatedAt
-                    applyLiveSessionData(this@MainActivity, remote.todos, remote.ddays, remote.timetable)
-                    refreshFromStorage()
-                    scheduleImmediateSync()
+    /**
+     * 위젯(이 기기)과 클라우드 세션을 양방향으로 맞춘다. "synced"는 양쪽이 마지막으로 같았던
+     * 상태이고, 매번 항목(할 일/D-Day/시간표)별로 이렇게 판단한다:
+     *  - 클라우드 값이 synced와 다르면 폰에서 바뀐 것 → 위젯에 반영
+     *  - 아니고 위젯 값이 synced와 다르면 위젯(체크 등)에서 바뀐 것 → 클라우드에 올림
+     *  - 같은 항목을 양쪽이 동시에 바꿨다면 폰 쪽이 이긴다(위젯 변경은 4초 안의 드문 경우에만 잃음)
+     * updatedAt 같은 시각 값은 판단에 쓰지 않는다 - 폰과 전자칠판 시계가 어긋나도 안전하다.
+     * 비교는 클라우드에서 읽을 때와 같은 normalize*()를 거친 값으로 해서, 형식이 안 맞아 걸러지는
+     * 항목 때문에 영원히 "다르다"로 보여 계속 올리는 일이 없게 한다.
+     */
+    private suspend fun runLiveSyncLoop(code: String) {
+        val client = FirestoreSessionClient
+        val initial = loadWidgetConfig(this)
+        var syncedTodos = client.normalizeTodos(initial.todos)
+        var syncedDDays = client.normalizeDDays(initial.ddays)
+        var syncedTimetable = client.normalizeTimetable(initial.timetable)
+
+        // 폰에서 빈 화면으로 시작하지 않도록 지금 위젯 값을 먼저 올려둔다. 실패하면 다음 턴에 다시 시도한다.
+        var initialWritten = client.patchSession(code, syncedTodos, syncedDDays, syncedTimetable)
+
+        while (true) {
+            delay(LIVE_SESSION_POLL_INTERVAL_MS)
+            if (liveSessionCodeState.value != code) break
+
+            if (!initialWritten) {
+                val cfg = loadWidgetConfig(this)
+                syncedTodos = client.normalizeTodos(cfg.todos)
+                syncedDDays = client.normalizeDDays(cfg.ddays)
+                syncedTimetable = client.normalizeTimetable(cfg.timetable)
+                initialWritten = client.patchSession(code, syncedTodos, syncedDDays, syncedTimetable)
+                continue
+            }
+
+            val remote = client.readSession(code) ?: continue
+            val local = loadWidgetConfig(this)
+            val localTodos = client.normalizeTodos(local.todos)
+            val localDDays = client.normalizeDDays(local.ddays)
+            val localTimetable = client.normalizeTimetable(local.timetable)
+
+            val takeTodos = remote.todos != null && remote.todos != syncedTodos
+            val takeDDays = remote.ddays != null && remote.ddays != syncedDDays
+            val takeTimetable = remote.timetable != null && remote.timetable != syncedTimetable
+            val pushTodos = !takeTodos && localTodos != syncedTodos
+            val pushDDays = !takeDDays && localDDays != syncedDDays
+            val pushTimetable = !takeTimetable && localTimetable != syncedTimetable
+
+            if (takeTodos || takeDDays || takeTimetable) {
+                applyLiveSessionData(
+                    this,
+                    if (takeTodos) remote.todos else null,
+                    if (takeDDays) remote.ddays else null,
+                    if (takeTimetable) remote.timetable else null
+                )
+                if (takeTodos) syncedTodos = remote.todos!!
+                if (takeDDays) syncedDDays = remote.ddays!!
+                if (takeTimetable) syncedTimetable = remote.timetable!!
+                refreshFromStorage()
+                scheduleImmediateSync()
+            }
+
+            if (pushTodos || pushDDays || pushTimetable) {
+                val ok = client.patchSession(
+                    code,
+                    if (pushTodos) localTodos else null,
+                    if (pushDDays) localDDays else null,
+                    if (pushTimetable) localTimetable else null
+                )
+                // 올리지 못했으면 synced를 그대로 둬서 다음 턴에 다시 올린다
+                if (ok) {
+                    if (pushTodos) syncedTodos = localTodos
+                    if (pushDDays) syncedDDays = localDDays
+                    if (pushTimetable) syncedTimetable = localTimetable
                 }
             }
         }

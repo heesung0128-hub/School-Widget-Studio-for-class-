@@ -340,12 +340,17 @@
     let saveChain = Promise.resolve();
     let pendingSaves = 0;
     let saveFailed = false;
+    let lastEditAt = 0;      // 마지막으로 폰에서 편집/저장이 일어난 시각 (위젯 변경 확인 때 낡은 응답을 가려내는 데 사용)
+    let sorting = false;     // 드래그로 순서를 바꾸는 중에는 화면을 다시 그리지 않는다
+    const markEdit = () => { lastEditAt = performance.now(); };
 
     function saveField(field) {
       pendingSaves++;
+      markEdit();
       setStatus("저장 중...");
       saveChain = saveChain.then(() => doSave(field)).then(() => {
         pendingSaves--;
+        markEdit();
         if (pendingSaves === 0) {
           if (saveFailed) setStatus("저장하지 못했습니다. 다시 시도해주세요.", "error");
           else setStatus("저장됨 ✓", "ok");
@@ -399,6 +404,62 @@
       } catch (e) {
         setStatus("불러오지 못했습니다. 인터넷 연결을 확인해주세요.", "error");
       }
+    }
+
+    // ---------- 위젯 쪽 변경 가져오기 ----------
+    // 전자칠판 위젯에서 체크하거나 앱에서 바꾼 내용이 이 화면에도 보이도록, 몇 초마다 세션을 다시 읽는다.
+    // 폰에서 편집/저장 중이거나 드래그 중이면 건너뛰고, 응답을 기다리는 사이 폰에서 편집이 있었다면
+    // 그 응답은 이미 낡은 것이므로 버린다(그대로 반영하면 방금 한 편집이 되돌아가 보인다).
+    const POLL_MS = 4000;
+    const todosKey = (list) => JSON.stringify(list.map((t) => [t.id, t.text, t.completed]));
+    const ddaysKey = (list) => JSON.stringify(list.map((d) => [d.title, d.targetDate]));
+    const timetableKey = (list) => JSON.stringify(list.map((t) => [t.day, t.periods]));
+    const phoneBusy = () => pendingSaves > 0 || timetableSaveTimer !== null || sorting;
+
+    async function pollRemote() {
+      if (!sessionCode || document.hidden || phoneBusy()) return;
+      const startedAt = performance.now();
+      let fields;
+      try {
+        const res = await fetch(docUrl());
+        if (!res.ok) return;
+        fields = ((await res.json()) || {}).fields || {};
+      } catch (e) {
+        return;
+      }
+      // 시각 해상도가 거칠어 같은 값이 나올 수 있으므로 >= 로 비교한다(버려도 다음 확인 때 다시 받으면 되므로 안전)
+      if (phoneBusy() || lastEditAt >= startedAt) return;
+
+      let changed = false;
+      if (fields.todos) {
+        const next = parseTodos(fields);
+        if (todosKey(next) !== todosKey(todos)) {
+          todos = next;
+          renderTodos();
+          changed = true;
+        }
+      }
+      if (fields.ddays) {
+        const next = parseDDays(fields);
+        if (ddaysKey(next) !== ddaysKey(ddays)) {
+          ddays = next;
+          renderDDays();
+          changed = true;
+        }
+      }
+      // 시간표 칸에 글자를 입력하고 있으면 다시 그리지 않는다(커서가 사라지므로). 다음 확인 때 반영된다.
+      const typingTimetable = periodListEl.contains(document.activeElement);
+      if (fields.timetable && !typingTimetable) {
+        const next = parseTimetable(fields);
+        if (timetableKey(next) !== timetableKey(timetable)) {
+          timetable = next;
+          renderTimetable();
+          changed = true;
+        }
+      }
+      const u = fields.updatedAt && Number(fields.updatedAt.integerValue);
+      if (u && u > lastKnownUpdatedAt) lastKnownUpdatedAt = u;
+      if (changed) setStatus("위젯에서 바뀐 내용을 반영했어요 ✓", "ok");
     }
 
     // ---------- 탭 ----------
@@ -472,7 +533,9 @@
     new Sortable(todoListEl, {
       handle: ".grip",
       animation: 150,
+      onStart: () => { sorting = true; },
       onEnd: (evt) => {
+        sorting = false;
         if (evt.oldIndex === evt.newIndex) return;
         const [moved] = todos.splice(evt.oldIndex, 1);
         todos.splice(evt.newIndex, 0, moved);
@@ -564,7 +627,9 @@
     new Sortable(ddayListEl, {
       handle: ".grip",
       animation: 150,
+      onStart: () => { sorting = true; },
       onEnd: (evt) => {
+        sorting = false;
         if (evt.oldIndex === evt.newIndex) return;
         const [moved] = ddays.splice(evt.oldIndex, 1);
         ddays.splice(evt.newIndex, 0, moved);
@@ -621,6 +686,7 @@
         input.value = entry.periods[i] || "";
         input.addEventListener("input", () => {
           entry.periods[i] = input.value;
+          markEdit();
           // 글자를 칠 때마다 저장하지 않고, 잠깐 멈추면(또는 칸을 벗어나면) 한 번에 저장한다
           if (timetableSaveTimer !== null) clearTimeout(timetableSaveTimer);
           timetableSaveTimer = setTimeout(() => {
@@ -647,7 +713,7 @@
       subtitleEl.textContent = "세션 코드가 없습니다.";
       setStatus("전자칠판 앱에서 [실시간 편집 시작]으로 표시된 QR코드를 다시 스캔해주세요.", "error");
     } else {
-      loadAll();
+      loadAll().then(() => setInterval(pollRemote, POLL_MS));
     }
   </script>
 </body>
