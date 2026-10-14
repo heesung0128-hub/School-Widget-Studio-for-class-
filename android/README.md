@@ -31,12 +31,13 @@ Android Studio를 열거나, 파일을 복사-붙여넣기 하거나, USB로 PC�
 이 방식은 각 기기의 앱 내부 저장소에만 설정이 저장되므로, 기기마다 서로 다른 학교/시간표를 쓸 수 있고
 클라우드 동기화나 서버 없이도 동작합니다. (반대로, 기기를 초기화하거나 앱을 지우면 다시 적용해야 합니다.)
 
-## 할 일 목록을 폰으로 편하게 수정하고 싶을 때 (실시간 편집)
+## 할 일·D-Day·시간표를 폰으로 편하게 수정하고 싶을 때 (실시간 편집)
 
 전자칠판처럼 자체 키보드로 타이핑하기 불편한 기기를 위한 기능입니다. 앱의 설정 화면에서
 **[실시간 편집 시작]**을 누르면 QR코드가 뜨고, 학생/교사가 자기 폰 카메라로 스캔하면
-폰 브라우저에서 할 일 목록만 간단히 편집하는 페이지([`mobile-edit.html`](../public/mobile-edit.html))가
-열립니다. 폰에서 체크/추가/삭제할 때마다 몇 초 안에 자동으로 이 기기의 위젯에 반영됩니다
+폰 브라우저에서 **할 일 / D-Day / 시간표** 세 탭으로 나뉜 편집 페이지([`mobile-edit.html`](../public/mobile-edit.html))가
+열립니다. (노트북 위젯의 "⚙ 설정" 창과 같은 구성입니다: D-Day는 이름+날짜로 추가하고 ☰ 손잡이로
+순서를 바꾸고 삭제, 시간표는 월~금 × 7교시 입력.) 폰에서 바꿀 때마다 몇 초 안에 자동으로 이 기기의 위젯에 반영됩니다
 ([`FirestoreSessionClient.kt`](app/src/main/java/com/school/widget/FirestoreSessionClient.kt)가
 Google Firestore의 REST API로 두 기기를 중계합니다 - Firebase SDK나 `google-services.json` 없이,
 이미 있는 OkHttp로 GET/PATCH 요청만 보내는 방식이라 앱이 무거워지지 않습니다).

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
-<title>할 일 편집</title>
+<title>위젯 편집</title>
 <style>
   * { box-sizing: border-box; }
   body {
@@ -21,8 +21,30 @@
   .sub {
     color: #94a3b8;
     font-size: 13px;
-    margin: 0 0 16px;
+    margin: 0 0 14px;
   }
+  .tabs {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 14px;
+  }
+  .tab-btn {
+    flex: 1;
+    padding: 10px 0;
+    border-radius: 10px;
+    border: 1px solid #1e293b;
+    background: #0f172a;
+    color: #94a3b8;
+    font-size: 14px;
+    font-weight: 700;
+  }
+  .tab-btn.active {
+    background: #38bdf8;
+    border-color: #38bdf8;
+    color: #04121f;
+  }
+  .panel { display: none; }
+  .panel.active { display: block; }
   .card {
     background: #0f172a;
     border: 1px solid #1e293b;
@@ -35,17 +57,22 @@
     gap: 8px;
     margin-bottom: 14px;
   }
-  .add-row input {
-    flex: 1;
+  .add-row.stack { flex-wrap: wrap; }
+  input[type="text"], input[type="date"] {
     padding: 12px;
     border-radius: 10px;
     border: 1px solid #334155;
     background: #0b1220;
     color: #f1f5f9;
-    font-size: 15px;
+    font-size: 16px;
+    min-width: 0;
+    color-scheme: dark;
   }
+  .add-row input[type="text"] { flex: 1; }
+  .add-row input[type="date"] { flex: 1; min-width: 150px; }
   .add-row button {
     padding: 0 16px;
+    min-height: 44px;
     border-radius: 10px;
     border: none;
     background: #38bdf8;
@@ -53,17 +80,15 @@
     font-weight: 700;
     font-size: 14px;
   }
-  .todo-row {
+  .row {
     display: flex;
     align-items: center;
     gap: 10px;
     padding: 6px 2px;
     background: #0f172a;
   }
-  .todo-row.sortable-ghost {
-    opacity: 0.35;
-  }
-  .todo-row.sortable-drag {
+  .row.sortable-ghost { opacity: 0.35; }
+  .row.sortable-drag {
     background: #1e293b;
     border-radius: 10px;
   }
@@ -76,21 +101,40 @@
     cursor: grab;
     touch-action: none;
   }
-  .todo-row input[type="checkbox"] {
+  .row input[type="checkbox"] {
     width: 20px;
     height: 20px;
     accent-color: #4ade80;
     flex-shrink: 0;
   }
-  .todo-text {
+  .row-text {
     flex: 1;
     font-size: 15px;
     word-break: break-word;
+    min-width: 0;
   }
-  .todo-text.done {
+  .row-text.done {
     color: #64748b;
     text-decoration: line-through;
   }
+  .dday-date {
+    display: block;
+    font-size: 12px;
+    color: #94a3b8;
+    margin-top: 2px;
+  }
+  .dday-badge {
+    flex-shrink: 0;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 8px;
+    background: rgba(59, 130, 246, 0.2);
+    color: #93c5fd;
+  }
+  .dday-badge.urgent { background: rgba(239, 68, 68, 0.2); color: #fca5a5; }
+  .dday-badge.warning { background: rgba(245, 158, 11, 0.2); color: #fcd34d; }
+  .dday-badge.passed { background: rgba(71, 85, 105, 0.3); color: #94a3b8; }
   .del-btn {
     border: none;
     background: transparent;
@@ -98,6 +142,45 @@
     font-size: 18px;
     padding: 4px 8px;
     flex-shrink: 0;
+  }
+  .days {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+  .day-btn {
+    flex: 1;
+    padding: 10px 0;
+    border-radius: 10px;
+    border: 1px solid #334155;
+    background: #0b1220;
+    color: #94a3b8;
+    font-size: 15px;
+    font-weight: 700;
+  }
+  .day-btn.active {
+    background: #1d4ed8;
+    border-color: #3b82f6;
+    color: #fff;
+  }
+  .period-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 5px 2px;
+  }
+  .period-label {
+    width: 44px;
+    flex-shrink: 0;
+    font-size: 14px;
+    font-weight: 700;
+    color: #60a5fa;
+  }
+  .period-row input[type="text"] { flex: 1; }
+  .hint {
+    color: #64748b;
+    font-size: 12px;
+    margin: 4px 2px 0;
   }
   .empty {
     color: #64748b;
@@ -117,15 +200,38 @@
 </style>
 </head>
 <body>
-  <h1>✅ 할 일 편집</h1>
+  <h1>✏️ 위젯 편집</h1>
   <p class="sub" id="subtitle">불러오는 중...</p>
 
-  <div class="add-row">
-    <input id="newTodoInput" type="text" placeholder="새로운 할 일 입력" maxlength="80" />
-    <button id="addBtn">추가</button>
+  <div class="tabs" id="tabs">
+    <button class="tab-btn active" data-tab="todos">✅ 할 일</button>
+    <button class="tab-btn" data-tab="ddays">📅 D-Day</button>
+    <button class="tab-btn" data-tab="timetable">🕐 시간표</button>
   </div>
 
-  <div id="list" class="card"></div>
+  <section class="panel active" id="panel-todos">
+    <div class="add-row">
+      <input id="newTodoInput" type="text" placeholder="새로운 할 일 입력" maxlength="80" />
+      <button id="addTodoBtn">추가</button>
+    </div>
+    <div id="todoList" class="card"></div>
+  </section>
+
+  <section class="panel" id="panel-ddays">
+    <div class="add-row stack">
+      <input id="newDDayTitle" type="text" placeholder="예: 중간고사, 여름방학" maxlength="30" />
+      <input id="newDDayDate" type="date" />
+      <button id="addDDayBtn">추가</button>
+    </div>
+    <div id="ddayList" class="card"></div>
+    <p class="hint">☰ 손잡이를 잡고 밀어서 순서를 바꿀 수 있어요. 위젯에는 위에서부터 순서대로 표시됩니다.</p>
+  </section>
+
+  <section class="panel" id="panel-timetable">
+    <div class="days" id="dayButtons"></div>
+    <div id="periodList" class="card"></div>
+    <p class="hint">비워두면 위젯에는 - 로 표시돼요. 입력하면 자동으로 저장됩니다.</p>
+  </section>
 
   <p class="status" id="status"></p>
 
@@ -133,19 +239,25 @@
   <script>
     const PROJECT_ID = "school-widget-for-class";
     const MAX_TODOS = 200;
+    const MAX_DDAYS = 20;
     const MAX_TEXT_LENGTH = 80;
+    const PERIODS = 7;
+    const WEEKDAYS = ["월", "화", "수", "목", "금"];
+    const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
     const params = new URLSearchParams(window.location.search);
     const sessionCode = (params.get("session") || "").trim();
 
-    const subtitleEl = document.getElementById("subtitle");
-    const listEl = document.getElementById("list");
-    const statusEl = document.getElementById("status");
-    const newTodoInput = document.getElementById("newTodoInput");
-    const addBtn = document.getElementById("addBtn");
+    const $ = (id) => document.getElementById(id);
+    const subtitleEl = $("subtitle");
+    const statusEl = $("status");
 
     let todos = [];
-    let saving = false;
+    let ddays = [];          // { id, title, targetDate } - id는 이 페이지 안에서만 쓰는 임시 값
+    let timetable = [];      // [{ day, periods: [...] }] (월~금은 항상 7교시로 채워 둠)
+    let lastKnownUpdatedAt = 0;
+    let localIdSeq = 0;
+    const nextLocalId = () => "l" + (++localIdSeq);
 
     function docUrl() {
       return `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/widgetSessions/${encodeURIComponent(sessionCode)}`;
@@ -156,95 +268,161 @@
       statusEl.className = "status" + (kind ? " " + kind : "");
     }
 
-    function fsString(v) { return { stringValue: String(v).slice(0, MAX_TEXT_LENGTH) }; }
-    function fsBool(v) { return { booleanValue: !!v }; }
+    // ---------- Firestore 값 변환 ----------
+    const fsString = (v) => ({ stringValue: String(v).slice(0, MAX_TEXT_LENGTH) });
+    const fsMap = (fields) => ({ mapValue: { fields } });
+    const fsArray = (values) => ({ arrayValue: { values } });
 
-    function todosToFirestoreValue(list) {
-      return {
-        arrayValue: {
-          values: list.slice(0, MAX_TODOS).map((t) => ({
-            mapValue: {
-              fields: {
-                id: fsString(t.id),
-                text: fsString(t.text),
-                completed: fsBool(t.completed),
-              },
-            },
-          })),
-        },
-      };
-    }
+    const BUILDERS = {
+      todos: () => fsArray(todos.slice(0, MAX_TODOS).map((t) => fsMap({
+        id: fsString(t.id),
+        text: fsString(t.text),
+        completed: { booleanValue: !!t.completed },
+      }))),
+      ddays: () => fsArray(ddays.slice(0, MAX_DDAYS).map((d) => fsMap({
+        title: fsString(d.title),
+        targetDate: fsString(d.targetDate),
+      }))),
+      timetable: () => fsArray(timetable.map((t) => fsMap({
+        day: fsString(t.day),
+        periods: fsArray(t.periods.map(fsString)),
+      }))),
+    };
 
-    function parseFirestoreDoc(json) {
-      const fields = json && json.fields;
-      if (!fields || !fields.todos || !fields.todos.arrayValue || !fields.todos.arrayValue.values) {
-        return [];
-      }
-      return fields.todos.arrayValue.values.map((v) => {
-        const f = (v.mapValue && v.mapValue.fields) || {};
+    const fsArrayValues = (field) =>
+      (field && field.arrayValue && field.arrayValue.values) || [];
+    const fsFields = (v) => (v && v.mapValue && v.mapValue.fields) || {};
+    const fsStr = (f) => (f && f.stringValue) || "";
+
+    function parseTodos(fields) {
+      return fsArrayValues(fields.todos).map((v) => {
+        const f = fsFields(v);
         return {
-          id: (f.id && f.id.stringValue) || String(Date.now() + Math.random()),
-          text: (f.text && f.text.stringValue) || "",
+          id: fsStr(f.id) || String(Date.now() + Math.random()),
+          text: fsStr(f.text),
           completed: !!(f.completed && f.completed.booleanValue),
         };
       }).slice(0, MAX_TODOS);
     }
 
-    async function loadTodos() {
-      try {
-        const res = await fetch(docUrl());
-        if (res.status === 404) {
-          todos = [];
-        } else if (res.ok) {
-          const json = await res.json();
-          todos = parseFirestoreDoc(json);
-        } else {
-          throw new Error("HTTP " + res.status);
-        }
-        subtitleEl.textContent = `세션 ${sessionCode} · 위젯과 자동으로 동기화됩니다`;
-        render();
-      } catch (e) {
-        setStatus("불러오지 못했습니다. 인터넷 연결을 확인해주세요.", "error");
-      }
+    function parseDDays(fields) {
+      return fsArrayValues(fields.ddays).map((v) => {
+        const f = fsFields(v);
+        return { id: nextLocalId(), title: fsStr(f.title), targetDate: fsStr(f.targetDate) };
+      }).filter((d) => d.title && DATE_RE.test(d.targetDate)).slice(0, MAX_DDAYS);
     }
 
-    async function saveTodos() {
-      saving = true;
+    function parseTimetable(fields) {
+      const parsed = fsArrayValues(fields.timetable).map((v) => {
+        const f = fsFields(v);
+        return { day: fsStr(f.day), periods: fsArrayValues(f.periods).map((p) => fsStr(p)) };
+      });
+      // 월~금은 항상 7교시 칸이 있도록 맞추고, 그 외 요일(토/일 등)은 건드리지 않고 그대로 되돌려 보낸다
+      WEEKDAYS.forEach((day) => {
+        let entry = parsed.find((t) => t.day === day);
+        if (!entry) {
+          entry = { day, periods: [] };
+          parsed.push(entry);
+        }
+        while (entry.periods.length < PERIODS) entry.periods.push("");
+      });
+      parsed.sort((a, b) => {
+        const ia = WEEKDAYS.indexOf(a.day);
+        const ib = WEEKDAYS.indexOf(b.day);
+        return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+      });
+      return parsed;
+    }
+
+    // ---------- 저장 ----------
+    // 탭마다 자기 필드만 updateMask로 저장해서, 한 탭의 편집이 다른 탭의 값을 덮어쓰지 않게 한다.
+    // 저장 요청은 한 줄로 순서대로 보내 네트워크 순서 역전으로 옛 값이 나중에 반영되는 일을 막는다.
+    let saveChain = Promise.resolve();
+    let pendingSaves = 0;
+    let saveFailed = false;
+
+    function saveField(field) {
+      pendingSaves++;
       setStatus("저장 중...");
+      saveChain = saveChain.then(() => doSave(field)).then(() => {
+        pendingSaves--;
+        if (pendingSaves === 0) {
+          if (saveFailed) setStatus("저장하지 못했습니다. 다시 시도해주세요.", "error");
+          else setStatus("저장됨 ✓", "ok");
+          saveFailed = false;
+        }
+      });
+    }
+
+    async function doSave(field) {
       try {
+        // 폰/전자칠판 시계가 어긋나 있어도 항상 이전 값보다 커지게 해서 앱이 변경을 놓치지 않게 한다
+        const updatedAt = Math.max(Date.now(), lastKnownUpdatedAt + 1);
         const body = {
           fields: {
-            todos: todosToFirestoreValue(todos),
-            updatedAt: { integerValue: String(Date.now()) },
+            [field]: BUILDERS[field](),
+            updatedAt: { integerValue: String(updatedAt) },
           },
         };
-        const res = await fetch(docUrl(), {
+        const url = docUrl() + `?updateMask.fieldPaths=${field}&updateMask.fieldPaths=updatedAt`;
+        const res = await fetch(url, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
         if (!res.ok) throw new Error("HTTP " + res.status);
-        setStatus("저장됨 ✓", "ok");
+        lastKnownUpdatedAt = updatedAt;
       } catch (e) {
-        setStatus("저장하지 못했습니다. 다시 시도해주세요.", "error");
-      } finally {
-        saving = false;
+        saveFailed = true;
       }
     }
 
-    function render() {
-      listEl.innerHTML = "";
+    async function loadAll() {
+      try {
+        const res = await fetch(docUrl());
+        let fields = {};
+        if (res.status === 404) {
+          fields = {};
+        } else if (res.ok) {
+          const json = await res.json();
+          fields = (json && json.fields) || {};
+        } else {
+          throw new Error("HTTP " + res.status);
+        }
+        todos = parseTodos(fields);
+        ddays = parseDDays(fields);
+        timetable = parseTimetable(fields);
+        const u = fields.updatedAt && fields.updatedAt.integerValue;
+        lastKnownUpdatedAt = Number(u) || 0;
+        subtitleEl.textContent = `세션 ${sessionCode} · 위젯과 자동으로 동기화됩니다`;
+        renderAll();
+      } catch (e) {
+        setStatus("불러오지 못했습니다. 인터넷 연결을 확인해주세요.", "error");
+      }
+    }
+
+    // ---------- 탭 ----------
+    function showTab(name) {
+      document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+      document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("active", p.id === "panel-" + name));
+    }
+    document.querySelectorAll(".tab-btn").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
+
+    // ---------- 할 일 ----------
+    const todoListEl = $("todoList");
+
+    function renderTodos() {
+      todoListEl.innerHTML = "";
       if (todos.length === 0) {
         const empty = document.createElement("div");
         empty.className = "empty";
         empty.textContent = "할 일이 없습니다. 위에서 추가해보세요.";
-        listEl.appendChild(empty);
+        todoListEl.appendChild(empty);
         return;
       }
       todos.forEach((todo) => {
         const row = document.createElement("div");
-        row.className = "todo-row";
-        row.dataset.id = todo.id;
+        row.className = "row";
 
         const grip = document.createElement("span");
         grip.className = "grip";
@@ -255,12 +433,12 @@
         checkbox.checked = todo.completed;
         checkbox.addEventListener("change", () => {
           todo.completed = checkbox.checked;
-          render();
-          saveTodos();
+          renderTodos();
+          saveField("todos");
         });
 
         const text = document.createElement("span");
-        text.className = "todo-text" + (todo.completed ? " done" : "");
+        text.className = "row-text" + (todo.completed ? " done" : "");
         text.textContent = todo.text;
 
         const delBtn = document.createElement("button");
@@ -268,53 +446,208 @@
         delBtn.textContent = "✕";
         delBtn.addEventListener("click", () => {
           todos = todos.filter((t) => t.id !== todo.id);
-          render();
-          saveTodos();
+          renderTodos();
+          saveField("todos");
         });
 
-        row.appendChild(grip);
-        row.appendChild(checkbox);
-        row.appendChild(text);
-        row.appendChild(delBtn);
-        listEl.appendChild(row);
+        row.append(grip, checkbox, text, delBtn);
+        todoListEl.appendChild(row);
       });
     }
 
-    // 데스크톱 위젯의 드래그-순서변경(그립 아이콘을 잡고 밀어서 순서 변경)과
-    // 동일한 조작감을 폰 터치에서도 안정적으로 지원하려면 순수 HTML5 드래그
-    // (draggable 속성)로는 부족해 SortableJS(터치 포인터 지원)를 사용한다.
-    // handle: ".grip"으로 그립 아이콘에서만 드래그가 시작되게 해 체크/삭제
-    // 버튼 조작과 충돌하지 않는다.
-    new Sortable(listEl, {
+    function addTodo() {
+      const input = $("newTodoInput");
+      const value = input.value.trim();
+      if (!value) return;
+      todos.push({ id: String(Date.now()), text: value.slice(0, MAX_TEXT_LENGTH), completed: false });
+      input.value = "";
+      renderTodos();
+      saveField("todos");
+    }
+    $("addTodoBtn").addEventListener("click", addTodo);
+    $("newTodoInput").addEventListener("keydown", (e) => { if (e.key === "Enter") addTodo(); });
+
+    // 데스크톱 위젯의 드래그-순서변경(그립 아이콘을 잡고 밀어서 순서 변경)과 같은 조작감을
+    // 터치에서도 안정적으로 지원하려고 SortableJS를 쓴다. handle로 그립에서만 드래그가 시작된다.
+    new Sortable(todoListEl, {
       handle: ".grip",
       animation: 150,
       onEnd: (evt) => {
         if (evt.oldIndex === evt.newIndex) return;
         const [moved] = todos.splice(evt.oldIndex, 1);
         todos.splice(evt.newIndex, 0, moved);
-        saveTodos();
+        saveField("todos");
       },
     });
 
-    function addTodo() {
-      const value = newTodoInput.value.trim();
-      if (!value) return;
-      todos.push({ id: String(Date.now()), text: value.slice(0, MAX_TEXT_LENGTH), completed: false });
-      newTodoInput.value = "";
-      render();
-      saveTodos();
+    // ---------- D-Day ----------
+    const ddayListEl = $("ddayList");
+
+    // 위젯(allDDayLabels)과 같은 규칙: 오늘이면 D-DAY, 이전이면 D+n, 7일 이내면 경고색
+    function ddayInfo(targetDate) {
+      const [y, m, d] = targetDate.split("-").map(Number);
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const diff = Math.round((new Date(y, m - 1, d) - today) / 86400000);
+      if (diff === 0) return { text: "D-DAY", cls: "urgent" };
+      if (diff > 0) return { text: "D-" + diff, cls: diff <= 7 ? "warning" : "" };
+      return { text: "D+" + (-diff), cls: "passed" };
     }
 
-    addBtn.addEventListener("click", addTodo);
-    newTodoInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") addTodo();
+    function renderDDays() {
+      ddayListEl.innerHTML = "";
+      if (ddays.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "등록된 D-Day가 없어요. 위에서 추가해보세요.";
+        ddayListEl.appendChild(empty);
+        return;
+      }
+      ddays.forEach((dday) => {
+        const row = document.createElement("div");
+        row.className = "row";
+
+        const grip = document.createElement("span");
+        grip.className = "grip";
+        grip.textContent = "☰";
+
+        const textWrap = document.createElement("div");
+        textWrap.className = "row-text";
+        const title = document.createElement("span");
+        title.textContent = dday.title;
+        const date = document.createElement("span");
+        date.className = "dday-date";
+        date.textContent = dday.targetDate;
+        textWrap.append(title, date);
+
+        const info = ddayInfo(dday.targetDate);
+        const badge = document.createElement("span");
+        badge.className = "dday-badge" + (info.cls ? " " + info.cls : "");
+        badge.textContent = info.text;
+
+        const delBtn = document.createElement("button");
+        delBtn.className = "del-btn";
+        delBtn.textContent = "✕";
+        delBtn.addEventListener("click", () => {
+          ddays = ddays.filter((d) => d.id !== dday.id);
+          renderDDays();
+          saveField("ddays");
+        });
+
+        row.append(grip, textWrap, badge, delBtn);
+        ddayListEl.appendChild(row);
+      });
+    }
+
+    function addDDay() {
+      const titleInput = $("newDDayTitle");
+      const dateInput = $("newDDayDate");
+      const title = titleInput.value.trim();
+      const date = dateInput.value;
+      if (!title || !DATE_RE.test(date)) {
+        setStatus("D-Day 이름과 날짜를 모두 입력해주세요.", "error");
+        return;
+      }
+      if (ddays.length >= MAX_DDAYS) {
+        setStatus(`D-Day는 최대 ${MAX_DDAYS}개까지 등록할 수 있어요.`, "error");
+        return;
+      }
+      ddays.push({ id: nextLocalId(), title: title.slice(0, MAX_TEXT_LENGTH), targetDate: date });
+      titleInput.value = "";
+      dateInput.value = "";
+      renderDDays();
+      saveField("ddays");
+    }
+    $("addDDayBtn").addEventListener("click", addDDay);
+    $("newDDayTitle").addEventListener("keydown", (e) => { if (e.key === "Enter") addDDay(); });
+
+    new Sortable(ddayListEl, {
+      handle: ".grip",
+      animation: 150,
+      onEnd: (evt) => {
+        if (evt.oldIndex === evt.newIndex) return;
+        const [moved] = ddays.splice(evt.oldIndex, 1);
+        ddays.splice(evt.newIndex, 0, moved);
+        saveField("ddays");
+      },
     });
+
+    // ---------- 시간표 ----------
+    // 데스크톱 설정 창은 월~금 × 7교시를 한 표에 보여주지만, 폰 화면에서는 칸이 너무 좁아서
+    // 요일을 고르면 그 요일의 7개 교시를 세로로 보여주는 방식으로 같은 내용을 편집한다.
+    const KOREAN_DAYS = ["일", "월", "화", "수", "목", "금", "토"];
+    let selectedDay = WEEKDAYS.includes(KOREAN_DAYS[new Date().getDay()]) ? KOREAN_DAYS[new Date().getDay()] : "월";
+    const dayButtonsEl = $("dayButtons");
+    const periodListEl = $("periodList");
+    let timetableSaveTimer = null;
+
+    function flushTimetableSave() {
+      if (timetableSaveTimer !== null) {
+        clearTimeout(timetableSaveTimer);
+        timetableSaveTimer = null;
+        saveField("timetable");
+      }
+    }
+
+    function renderTimetable() {
+      dayButtonsEl.innerHTML = "";
+      WEEKDAYS.forEach((day) => {
+        const btn = document.createElement("button");
+        btn.className = "day-btn" + (day === selectedDay ? " active" : "");
+        btn.textContent = day;
+        btn.addEventListener("click", () => {
+          flushTimetableSave();
+          selectedDay = day;
+          renderTimetable();
+        });
+        dayButtonsEl.appendChild(btn);
+      });
+
+      periodListEl.innerHTML = "";
+      const entry = timetable.find((t) => t.day === selectedDay);
+      if (!entry) return;
+      for (let i = 0; i < PERIODS; i++) {
+        const row = document.createElement("div");
+        row.className = "period-row";
+
+        const label = document.createElement("span");
+        label.className = "period-label";
+        label.textContent = (i + 1) + "교시";
+
+        const input = document.createElement("input");
+        input.type = "text";
+        input.maxLength = 15;
+        input.placeholder = "-";
+        input.value = entry.periods[i] || "";
+        input.addEventListener("input", () => {
+          entry.periods[i] = input.value;
+          // 글자를 칠 때마다 저장하지 않고, 잠깐 멈추면(또는 칸을 벗어나면) 한 번에 저장한다
+          if (timetableSaveTimer !== null) clearTimeout(timetableSaveTimer);
+          timetableSaveTimer = setTimeout(() => {
+            timetableSaveTimer = null;
+            saveField("timetable");
+          }, 800);
+        });
+        input.addEventListener("blur", flushTimetableSave);
+
+        row.append(label, input);
+        periodListEl.appendChild(row);
+      }
+    }
+
+    window.addEventListener("pagehide", flushTimetableSave);
+
+    function renderAll() {
+      renderTodos();
+      renderDDays();
+      renderTimetable();
+    }
 
     if (!sessionCode) {
       subtitleEl.textContent = "세션 코드가 없습니다.";
       setStatus("전자칠판 앱에서 [실시간 편집 시작]으로 표시된 QR코드를 다시 스캔해주세요.", "error");
     } else {
-      loadTodos();
+      loadAll();
     }
   </script>
 </body>

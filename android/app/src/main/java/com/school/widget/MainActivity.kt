@@ -189,7 +189,7 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * "실시간 편집" 시작: 새 세션 코드를 만들어 현재 할 일을 클라우드에 올려두고
+     * "실시간 편집" 시작: 새 세션 코드를 만들어 현재 할 일/D-Day/시간표를 클라우드에 올려두고
      * QR을 보여준 뒤, 몇 초 간격으로 그 세션을 확인해 폰에서 바뀐 내용을 자동으로
      * 이 기기(위젯)에 반영한다. 카메라로 QR을 찍기 불편한 기기가 원인이었던
      * "전자칠판에서 타이핑하기 불편함" 문제를 폰에서 대신 입력하게 해서 해결한다.
@@ -207,16 +207,19 @@ class MainActivity : ComponentActivity() {
         }
 
         livePollJob = lifecycleScope.launch {
-            // 폰에서 빈 목록으로 시작하지 않도록, 지금 위젯에 있는 할 일을 먼저 올려둔다.
-            FirestoreSessionClient.writeTodos(code, loadWidgetConfig(this@MainActivity).todos)
+            // 폰에서 빈 화면으로 시작하지 않도록, 지금 위젯에 있는 할 일/D-Day/시간표를 먼저 올려둔다.
+            val initial = loadWidgetConfig(this@MainActivity)
+            FirestoreSessionClient.writeSession(code, initial.todos, initial.ddays, initial.timetable)
 
             while (true) {
                 delay(LIVE_SESSION_POLL_INTERVAL_MS)
                 val activeCode = liveSessionCodeState.value ?: break
-                val (remoteTodos, updatedAt) = FirestoreSessionClient.readSession(activeCode) ?: continue
-                if (updatedAt > lastAppliedRemoteUpdatedAt) {
-                    lastAppliedRemoteUpdatedAt = updatedAt
-                    reorderTodos(this@MainActivity, remoteTodos)
+                val remote = FirestoreSessionClient.readSession(activeCode) ?: continue
+                // 크기 비교(>) 대신 "달라졌는가"로 판단한다 - 폰과 전자칠판의 시계가 어긋나 있으면
+                // 폰이 저장한 updatedAt이 더 작은 값이 되어 변경을 영영 못 받을 수 있기 때문.
+                if (remote.updatedAt != lastAppliedRemoteUpdatedAt) {
+                    lastAppliedRemoteUpdatedAt = remote.updatedAt
+                    applyLiveSessionData(this@MainActivity, remote.todos, remote.ddays, remote.timetable)
                     refreshFromStorage()
                     scheduleImmediateSync()
                 }
@@ -586,13 +589,13 @@ private fun SchoolWidgetSettingsScreen(
                         Spacer(modifier = Modifier.width(16.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "실시간 편집 (폰으로 할 일 수정)",
+                                text = "실시간 편집 (폰으로 할 일·D-Day·시간표 수정)",
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White,
                                 fontSize = 15.sp
                             )
                             Text(
-                                text = "QR을 폰 카메라로 찍으면 폰에서 할 일을 편하게 수정할 수 있고, 몇 초 안에 자동으로 여기 반영됩니다.",
+                                text = "QR을 폰 카메라로 찍으면 폰에서 할 일, D-Day, 시간표를 편하게 수정할 수 있고, 몇 초 안에 자동으로 여기 반영됩니다.",
                                 color = Color(0xFF94A3B8),
                                 fontSize = 12.sp
                             )

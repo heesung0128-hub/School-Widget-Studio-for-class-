@@ -278,6 +278,28 @@ fun deleteTodo(context: Context, todoId: String) {
     }
 }
 
+/**
+ * 폰 실시간 편집 세션에서 받은 값을 한 번에(같은 락 안에서) 반영한다. null인 항목은
+ * 폰이 보내지 않은 것이므로 위젯의 기존 값을 그대로 둔다. 값의 개수/길이 제한은
+ * FirestoreSessionClient가 읽을 때 이미 적용했다.
+ */
+fun applyLiveSessionData(
+    context: Context,
+    todos: List<TodoItemData>?,
+    ddays: List<DDayItem>?,
+    timetable: List<TimetableDay>?
+) {
+    synchronized(configFileLock) {
+        val current = loadWidgetConfig(context)
+        val updated = current.copy(
+            todos = todos ?: current.todos,
+            ddays = ddays ?: current.ddays,
+            timetable = timetable ?: current.timetable
+        )
+        java.io.File(context.filesDir, INTERNAL_CONFIG_FILENAME).writeText(updated.toJson().toString())
+    }
+}
+
 /** 앱의 할 일 관리 화면에서 드래그로 바꾼 순서(또는 실시간 편집에서 받은 목록)를 그대로 저장한다. */
 fun reorderTodos(context: Context, newOrder: List<TodoItemData>) {
     synchronized(configFileLock) {

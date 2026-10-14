@@ -10,8 +10,20 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * "실시간 편집" 기능(전자칠판이 QR을 보여주고, 폰으로 스캔해 할 일 목록만 편하게
- * 수정하는 기능)을 위한 최소한의 Firestore REST 클라이언트.
+ * 폰에서 읽어온 세션 문서. 각 목록은 문서에 그 필드가 아예 없으면 null이다
+ * (예: 이전 버전 폰 페이지가 만든 세션에는 ddays/timetable이 없음) - null인 항목은
+ * 위젯의 기존 값을 건드리지 않고 그대로 두기 위해 "비어 있음"과 구분한다.
+ */
+data class LiveSessionSnapshot(
+    val todos: List<TodoItemData>?,
+    val ddays: List<DDayItem>?,
+    val timetable: List<TimetableDay>?,
+    val updatedAt: Long
+)
+
+/**
+ * "실시간 편집" 기능(전자칠판이 QR을 보여주고, 폰으로 스캔해 할 일/D-Day/시간표를
+ * 편하게 수정하는 기능)을 위한 최소한의 Firestore REST 클라이언트.
  *
  * Firebase Android SDK(google-services.json, Gradle 플러그인)를 추가하는 대신
  * 이미 있는 OkHttp로 Firestore의 공개 REST API만 직접 호출한다 - 문서가
@@ -24,7 +36,12 @@ import org.json.JSONObject
 object FirestoreSessionClient {
     private const val PROJECT_ID = "school-widget-for-class"
     private const val MAX_TODOS = 200
+    private const val MAX_DDAYS = 20
+    private const val MAX_TIMETABLE_DAYS = 7
+    private const val MAX_PERIODS_PER_DAY = 10
     private const val MAX_TEXT_LENGTH = 80
+
+    private val DATE_REGEX = Regex("""\d{4}-\d{2}-\d{2}""")
 
     private val client = OkHttpClient()
     private val jsonMediaType = "application/json".toMediaType()
@@ -32,82 +49,164 @@ object FirestoreSessionClient {
     private fun docUrl(sessionCode: String): String =
         "https://firestore.googleapis.com/v1/projects/$PROJECT_ID/databases/(default)/documents/widgetSessions/$sessionCode"
 
-    /** 세션 문서를 새로 만들거나 완전히 덮어쓴다 (todos + updatedAt). */
-    suspend fun writeTodos(sessionCode: String, todos: List<TodoItemData>): Boolean =
-        withContext(Dispatchers.IO) {
-            try {
-                val todosArray = JSONArray()
-                todos.take(MAX_TODOS).forEach { todo ->
-                    todosArray.put(
-                        JSONObject().put(
-                            "mapValue",
-                            JSONObject().put(
-                                "fields",
-                                JSONObject()
-                                    .put("id", JSONObject().put("stringValue", todo.id))
-                                    .put("text", JSONObject().put("stringValue", todo.text.take(MAX_TEXT_LENGTH)))
-                                    .put("completed", JSONObject().put("booleanValue", todo.completed))
-                            )
-                        )
+    private fun stringField(value: String) = JSONObject().put("stringValue", value.take(MAX_TEXT_LENGTH))
+
+    private fun mapField(fields: JSONObject) = JSONObject().put("mapValue", JSONObject().put("fields", fields))
+
+    private fun arrayField(values: JSONArray) = JSONObject().put("arrayValue", JSONObject().put("values", values))
+
+    /** 세션 문서를 새로 만들거나 완전히 덮어쓴다 (할 일 + D-Day + 시간표 + updatedAt). */
+    suspend fun writeSession(
+        sessionCode: String,
+        todos: List<TodoItemData>,
+        ddays: List<DDayItem>,
+        timetable: List<TimetableDay>
+    ): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val todosArray = JSONArray()
+            todos.take(MAX_TODOS).forEach { todo ->
+                todosArray.put(
+                    mapField(
+                        JSONObject()
+                            .put("id", stringField(todo.id))
+                            .put("text", stringField(todo.text))
+                            .put("completed", JSONObject().put("booleanValue", todo.completed))
                     )
-                }
-
-                val body = JSONObject().put(
-                    "fields",
-                    JSONObject()
-                        .put("todos", JSONObject().put("arrayValue", JSONObject().put("values", todosArray)))
-                        .put("updatedAt", JSONObject().put("integerValue", System.currentTimeMillis().toString()))
                 )
-
-                val request = Request.Builder()
-                    .url(docUrl(sessionCode))
-                    .patch(body.toString().toRequestBody(jsonMediaType))
-                    .build()
-
-                client.newCall(request).execute().use { it.isSuccessful }
-            } catch (e: Exception) {
-                false
             }
-        }
 
-    /** 세션 문서를 읽어 (할일 목록, updatedAt) 을 반환한다. 문서가 없거나 실패하면 null. */
-    suspend fun readSession(sessionCode: String): Pair<List<TodoItemData>, Long>? =
+            val ddaysArray = JSONArray()
+            ddays.take(MAX_DDAYS).forEach { dday ->
+                ddaysArray.put(
+                    mapField(
+                        JSONObject()
+                            .put("title", stringField(dday.title))
+                            .put("targetDate", stringField(dday.targetDate))
+                    )
+                )
+            }
+
+            val timetableArray = JSONArray()
+            timetable.take(MAX_TIMETABLE_DAYS).forEach { day ->
+                val periodsArray = JSONArray()
+                day.periods.take(MAX_PERIODS_PER_DAY).forEach { periodsArray.put(stringField(it)) }
+                timetableArray.put(
+                    mapField(
+                        JSONObject()
+                            .put("day", stringField(day.day))
+                            .put("periods", arrayField(periodsArray))
+                    )
+                )
+            }
+
+            val body = JSONObject().put(
+                "fields",
+                JSONObject()
+                    .put("todos", arrayField(todosArray))
+                    .put("ddays", arrayField(ddaysArray))
+                    .put("timetable", arrayField(timetableArray))
+                    .put("updatedAt", JSONObject().put("integerValue", System.currentTimeMillis().toString()))
+            )
+
+            val request = Request.Builder()
+                .url(docUrl(sessionCode))
+                .patch(body.toString().toRequestBody(jsonMediaType))
+                .build()
+
+            client.newCall(request).execute().use { it.isSuccessful }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /** 세션 문서를 읽는다. 문서가 없거나 네트워크 오류면 null. */
+    suspend fun readSession(sessionCode: String): LiveSessionSnapshot? =
         withContext(Dispatchers.IO) {
             try {
                 val request = Request.Builder().url(docUrl(sessionCode)).get().build()
                 client.newCall(request).execute().use { response ->
                     if (!response.isSuccessful) return@withContext null
                     val json = JSONObject(response.body?.string() ?: return@withContext null)
-                    val fields = json.optJSONObject("fields") ?: return@withContext (emptyList<TodoItemData>() to 0L)
-
-                    val todos = mutableListOf<TodoItemData>()
-                    val todosArray = fields.optJSONObject("todos")
-                        ?.optJSONObject("arrayValue")
-                        ?.optJSONArray("values")
-                    if (todosArray != null) {
-                        for (i in 0 until minOf(todosArray.length(), MAX_TODOS)) {
-                            val f = todosArray.getJSONObject(i).optJSONObject("mapValue")?.optJSONObject("fields")
-                                ?: continue
-                            todos.add(
-                                TodoItemData(
-                                    id = f.optJSONObject("id")?.optString("stringValue") ?: i.toString(),
-                                    text = (f.optJSONObject("text")?.optString("stringValue") ?: "").take(MAX_TEXT_LENGTH),
-                                    completed = f.optJSONObject("completed")?.optBoolean("booleanValue") ?: false
-                                )
-                            )
-                        }
-                    }
+                    val fields = json.optJSONObject("fields")
+                        ?: return@withContext LiveSessionSnapshot(null, null, null, 0L)
 
                     val updatedAt = fields.optJSONObject("updatedAt")
                         ?.optString("integerValue")
                         ?.toLongOrNull() ?: 0L
 
-                    todos to updatedAt
+                    LiveSessionSnapshot(
+                        todos = parseTodos(fields),
+                        ddays = parseDDays(fields),
+                        timetable = parseTimetable(fields),
+                        updatedAt = updatedAt
+                    )
                 }
             } catch (e: Exception) {
                 null
             }
         }
+
+    /** 필드 자체가 없으면 null, 있으면(비어 있어도) 목록. Firestore는 빈 배열의 values를 생략한다. */
+    private fun arrayValues(fields: JSONObject, name: String): JSONArray? {
+        val field = fields.optJSONObject(name) ?: return null
+        val arrayValue = field.optJSONObject("arrayValue") ?: return null
+        return arrayValue.optJSONArray("values") ?: JSONArray()
+    }
+
+    private fun mapFields(element: JSONArray, index: Int): JSONObject? =
+        element.optJSONObject(index)?.optJSONObject("mapValue")?.optJSONObject("fields")
+
+    private fun JSONObject.stringOf(name: String): String =
+        optJSONObject(name)?.optString("stringValue") ?: ""
+
+    private fun parseTodos(fields: JSONObject): List<TodoItemData>? {
+        val values = arrayValues(fields, "todos") ?: return null
+        val todos = mutableListOf<TodoItemData>()
+        for (i in 0 until minOf(values.length(), MAX_TODOS)) {
+            val f = mapFields(values, i) ?: continue
+            todos.add(
+                TodoItemData(
+                    id = f.stringOf("id").ifEmpty { i.toString() },
+                    text = f.stringOf("text").take(MAX_TEXT_LENGTH),
+                    completed = f.optJSONObject("completed")?.optBoolean("booleanValue") ?: false
+                )
+            )
+        }
+        return todos
+    }
+
+    private fun parseDDays(fields: JSONObject): List<DDayItem>? {
+        val values = arrayValues(fields, "ddays") ?: return null
+        val ddays = mutableListOf<DDayItem>()
+        for (i in 0 until minOf(values.length(), MAX_DDAYS)) {
+            val f = mapFields(values, i) ?: continue
+            val title = f.stringOf("title").trim().take(MAX_TEXT_LENGTH)
+            val date = f.stringOf("targetDate").trim()
+            // 날짜 형식이 아닌 값은 위젯이 어차피 표시하지 못하므로 저장 단계에서 걸러낸다
+            if (title.isEmpty() || !DATE_REGEX.matches(date)) continue
+            ddays.add(DDayItem(title, date))
+        }
+        return ddays
+    }
+
+    private fun parseTimetable(fields: JSONObject): List<TimetableDay>? {
+        val values = arrayValues(fields, "timetable") ?: return null
+        val days = mutableListOf<TimetableDay>()
+        for (i in 0 until minOf(values.length(), MAX_TIMETABLE_DAYS)) {
+            val f = mapFields(values, i) ?: continue
+            val periods = mutableListOf<String>()
+            val periodValues = f.optJSONObject("periods")?.optJSONObject("arrayValue")?.optJSONArray("values")
+            if (periodValues != null) {
+                for (j in 0 until minOf(periodValues.length(), MAX_PERIODS_PER_DAY)) {
+                    periods.add(
+                        (periodValues.optJSONObject(j)?.optString("stringValue") ?: "").take(MAX_TEXT_LENGTH)
+                    )
+                }
+            }
+            days.add(TimetableDay(f.stringOf("day").take(4), periods))
+        }
+        return days
+    }
 
     /** 세션이 더 이상 필요 없을 때(편집 종료) 문서를 지운다. 실패해도 무해하므로 결과를 무시해도 된다. */
     suspend fun deleteSession(sessionCode: String): Boolean =
